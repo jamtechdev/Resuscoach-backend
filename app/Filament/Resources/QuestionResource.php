@@ -4,19 +4,19 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\QuestionResource\Pages;
 use App\Models\Question;
-use Filament\Forms\Components\Section;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Tables\Actions\BulkAction;
-use Filament\Tables\Actions\BulkActionGroup;
-use Filament\Tables\Actions\DeleteAction;
-use Filament\Tables\Actions\DeleteBulkAction;
-use Filament\Tables\Actions\EditAction;
-use Filament\Tables\Actions\ViewAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -178,7 +178,7 @@ class QuestionResource extends Resource
                     ->label('Question')
                     ->limit(60)
                     ->searchable()
-                    ->tooltip(fn (Question $record): string => $record->stem),
+                    ->tooltip(fn(Question $record): string => $record->stem),
                 TextColumn::make('topic')
                     ->label('Topic')
                     ->sortable()
@@ -198,7 +198,7 @@ class QuestionResource extends Resource
                     ->label('Difficulty')
                     ->sortable()
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
+                    ->color(fn(string $state): string => match ($state) {
                         'Easy' => 'success',
                         'Medium' => 'warning',
                         'Hard' => 'danger',
@@ -220,7 +220,7 @@ class QuestionResource extends Resource
             ])
             ->filters([
                 SelectFilter::make('topic')
-                    ->options(fn () => Question::distinct()->pluck('topic', 'topic')->toArray()),
+                    ->options(fn() => Question::distinct()->pluck('topic', 'topic')->toArray()),
                 SelectFilter::make('difficulty')
                     ->options([
                         'Easy' => 'Easy',
@@ -244,12 +244,12 @@ class QuestionResource extends Resource
                     BulkAction::make('activate')
                         ->label('Activate Selected')
                         ->icon('heroicon-o-check-circle')
-                        ->action(fn ($records) => $records->each->update(['is_active' => true]))
+                        ->action(fn($records) => $records->each->update(['is_active' => true]))
                         ->deselectRecordsAfterCompletion(),
                     BulkAction::make('deactivate')
                         ->label('Deactivate Selected')
                         ->icon('heroicon-o-x-circle')
-                        ->action(fn ($records) => $records->each->update(['is_active' => false]))
+                        ->action(fn($records) => $records->each->update(['is_active' => false]))
                         ->deselectRecordsAfterCompletion(),
                 ]),
             ])

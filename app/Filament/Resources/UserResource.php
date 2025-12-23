@@ -4,16 +4,16 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
 use App\Models\User;
+use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
-use Filament\Forms\Components\Section;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Tables\Actions\BulkActionGroup;
-use Filament\Tables\Actions\DeleteBulkAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
@@ -70,27 +70,35 @@ class UserResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->query(User::query()->where('id', '!=', auth()->id())) // Exclude current logged-in admin
             ->columns([
                 TextColumn::make('id')
                     ->label('ID')
                     ->sortable(),
                 TextColumn::make('name')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->weight('medium'),
                 TextColumn::make('email')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->copyable()
+                    ->copyMessage('Email address copied'),
                 IconColumn::make('is_admin')
                     ->label('Admin')
                     ->boolean()
-                    ->sortable(),
+                    ->sortable()
+                    ->trueIcon('heroicon-o-shield-check')
+                    ->falseIcon('heroicon-o-user'),
                 TextColumn::make('exam_attempts_count')
                     ->label('Exams Taken')
                     ->counts('examAttempts')
-                    ->sortable(),
+                    ->sortable()
+                    ->badge()
+                    ->color('info'),
                 TextColumn::make('created_at')
                     ->label('Registered')
-                    ->dateTime()
+                    ->dateTime('M j, Y')
                     ->sortable()
                     ->toggleable(),
             ])
@@ -102,15 +110,18 @@ class UserResource extends Resource
                     ->falseLabel('Regular Users'),
             ])
             ->actions([
-                \Filament\Tables\Actions\ViewAction::make(),
-                \Filament\Tables\Actions\EditAction::make(),
+                ViewAction::make(),
+                EditAction::make(),
             ])
             ->bulkActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
             ])
-            ->defaultSort('created_at', 'desc');
+            ->defaultSort('created_at', 'desc')
+            ->emptyStateHeading('No users found')
+            ->emptyStateDescription('Users will appear here once they register.')
+            ->emptyStateIcon('heroicon-o-users');
     }
 
     public static function getRelations(): array
@@ -132,6 +143,18 @@ class UserResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        return static::getModel()::count();
+        return static::getModel()::count(); // Total users (admins + regular users)
+    }
+
+    public static function canViewAny(): bool
+    {
+        // Only admins can view the user list
+        return auth()->user()?->is_admin ?? false;
+    }
+
+    public static function canCreate(): bool
+    {
+        // Only admins can create users
+        return auth()->user()?->is_admin ?? false;
     }
 }
