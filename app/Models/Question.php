@@ -19,10 +19,18 @@ class Question extends Model
         'option_e',
         'correct_option',
         'explanation',
+        'clinical_presentation',
+        'condition_code',
+        'question_number',
         'topic',
         'subtopic',
+        'guideline_reference',
         'guideline_excerpt',
         'guideline_source',
+        'guideline_url',
+        'references',
+        'image_url',
+        'has_image',
         'difficulty',
         'is_active',
     ];
@@ -31,6 +39,9 @@ class Question extends Model
     {
         return [
             'is_active' => 'boolean',
+            'has_image' => 'boolean',
+            'question_number' => 'integer',
+            'references' => 'array',
         ];
     }
 
@@ -83,6 +94,22 @@ class Question extends Model
     }
 
     /**
+     * Scope to filter by clinical presentation.
+     */
+    public function scopeByClinicalPresentation($query, string $clinicalPresentation)
+    {
+        return $query->where('clinical_presentation', $clinicalPresentation);
+    }
+
+    /**
+     * Scope to filter by condition code.
+     */
+    public function scopeByConditionCode($query, string $conditionCode)
+    {
+        return $query->where('condition_code', $conditionCode);
+    }
+
+    /**
      * Get all options as an array.
      */
     public function getOptionsAttribute(): array
@@ -94,5 +121,13 @@ class Question extends Model
             'D' => $this->option_d,
             'E' => $this->option_e,
         ];
+    }
+
+    /**
+     * Get formatted references array.
+     */
+    public function getFormattedReferencesAttribute(): array
+    {
+        return $this->references ?? [];
     }
 }

@@ -10,6 +10,8 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Group;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -49,13 +51,20 @@ class QuestionResource extends Resource
                 Section::make('Question Details')
                     ->description('Enter the clinical scenario and question')
                     ->schema([
+                        TextInput::make('question_number')
+                            ->label('Question Number')
+                            ->numeric()
+                            ->required()
+                            ->helperText('Order within the condition (e.g., 1, 2, 3)')
+                            ->minValue(1),
                         Textarea::make('stem')
                             ->label('Question Stem / Clinical Vignette')
                             ->required()
                             ->rows(5)
                             ->columnSpanFull()
                             ->helperText('Enter the clinical scenario and question text'),
-                    ]),
+                    ])
+                    ->columns(2),
 
                 Section::make('Answer Options')
                     ->description('Enter all 5 answer options')
@@ -100,23 +109,46 @@ class QuestionResource extends Resource
                         Textarea::make('explanation')
                             ->label('Answer Explanation')
                             ->required()
-                            ->rows(4)
+                            ->rows(6)
                             ->columnSpanFull()
-                            ->helperText('Explain why the correct answer is right and why others are wrong'),
+                            ->helperText('Explain why the correct answer is right and why others are wrong. Include rationale for correct answer and other options.'),
+                        Textarea::make('guideline_reference')
+                            ->label('Guideline Reference')
+                            ->rows(2)
+                            ->columnSpanFull()
+                            ->helperText('Full guideline reference text (e.g., "NICE MI (STEMI) QS68: Offer immediate fibrinolysis if PPCI delay >120 min")'),
                         Textarea::make('guideline_excerpt')
                             ->label('Guideline Excerpt')
                             ->rows(3)
                             ->columnSpanFull()
-                            ->helperText('Relevant text from official medical guidelines'),
+                            ->helperText('Relevant text excerpt from official medical guidelines'),
                         TextInput::make('guideline_source')
-                            ->label('Guideline Source')
+                            ->label('Guideline Source Name')
                             ->placeholder('e.g., NICE CG95, RCEM Guidelines')
                             ->maxLength(255),
-                    ]),
+                        TextInput::make('guideline_url')
+                            ->label('Guideline URL')
+                            ->url()
+                            ->placeholder('https://www.nice.org.uk/guidance/...')
+                            ->maxLength(500)
+                            ->columnSpanFull()
+                            ->helperText('Full URL to the guideline document'),
+                    ])
+                    ->columns(2),
 
                 Section::make('Classification')
                     ->description('Categorize the question')
                     ->schema([
+                        TextInput::make('clinical_presentation')
+                            ->label('Clinical Presentation')
+                            ->placeholder('e.g., CP1. Chest pain, CP2. Breathlessness')
+                            ->maxLength(50)
+                            ->helperText('Clinical presentation code (e.g., CP1, CP2)'),
+                        TextInput::make('condition_code')
+                            ->label('Condition Code')
+                            ->placeholder('e.g., CC1. Acute Coronary Syndromes')
+                            ->maxLength(50)
+                            ->helperText('Condition/issue code (e.g., CC1, CC2)'),
                         TextInput::make('topic')
                             ->label('Main Topic')
                             ->required()
@@ -163,6 +195,62 @@ class QuestionResource extends Resource
                             ->default(true),
                     ])
                     ->columns(2),
+
+                Section::make('References')
+                    ->description('Add multiple reference sources')
+                    ->schema([
+                        Repeater::make('references')
+                            ->label('References')
+                            ->schema([
+                                TextInput::make('title')
+                                    ->label('Title')
+                                    ->required()
+                                    ->placeholder('e.g., NICE MI (STEMI) QS68')
+                                    ->maxLength(255)
+                                    ->columnSpanFull(),
+                                TextInput::make('url')
+                                    ->label('URL')
+                                    ->url()
+                                    ->placeholder('https://www.nice.org.uk/guidance/...')
+                                    ->maxLength(500)
+                                    ->columnSpanFull(),
+                            ])
+                            ->itemLabel(function (array $state): ?string {
+                                // Show the title if available, otherwise just "Reference"
+                                return !empty($state['title']) ? $state['title'] : 'Reference';
+                            })
+                            ->addActionLabel('Add Reference')
+                            ->defaultItems(0)
+                            ->collapsible()
+                            ->reorderable()
+                            ->collapsed(false),
+                    ]),
+
+                Section::make('Media')
+                    ->description('Add images or ECG references if applicable')
+                    ->schema([
+                        Toggle::make('has_image')
+                            ->label('Has Image')
+                            ->helperText('Check if this question includes an image or ECG')
+                            ->default(false)
+                            ->reactive()
+                            ->afterStateUpdated(function ($state, callable $set) {
+                                if (!$state) {
+                                    $set('image_url', null);
+                                }
+                            }),
+                        TextInput::make('image_url')
+                            ->label('Image/ECG URL')
+                            ->url()
+                            ->placeholder('https://example.com/image.jpg')
+                            ->maxLength(500)
+                            ->helperText('URL to question image, ECG, or diagram')
+                            ->visible(fn($get) => $get('has_image'))
+                            ->columnSpanFull(),
+                    ])
+                    ->collapsible()
+                    ->collapsed()
+                    ->compact(),
             ]);
     }
 
@@ -189,6 +277,20 @@ class QuestionResource extends Resource
                     ->label('Subtopic')
                     ->sortable()
                     ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('clinical_presentation')
+                    ->label('Clinical Presentation')
+                    ->sortable()
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('condition_code')
+                    ->label('Condition Code')
+                    ->sortable()
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                IconColumn::make('has_image')
+                    ->label('Has Image')
+                    ->boolean()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('correct_option')
                     ->label('Answer')
@@ -221,6 +323,12 @@ class QuestionResource extends Resource
             ->filters([
                 SelectFilter::make('topic')
                     ->options(fn() => Question::distinct()->pluck('topic', 'topic')->toArray()),
+                SelectFilter::make('clinical_presentation')
+                    ->label('Clinical Presentation')
+                    ->options(fn() => Question::distinct()->whereNotNull('clinical_presentation')->pluck('clinical_presentation', 'clinical_presentation')->toArray()),
+                SelectFilter::make('condition_code')
+                    ->label('Condition Code')
+                    ->options(fn() => Question::distinct()->whereNotNull('condition_code')->pluck('condition_code', 'condition_code')->toArray()),
                 SelectFilter::make('difficulty')
                     ->options([
                         'Easy' => 'Easy',
@@ -232,6 +340,11 @@ class QuestionResource extends Resource
                     ->placeholder('All Questions')
                     ->trueLabel('Active Only')
                     ->falseLabel('Inactive Only'),
+                TernaryFilter::make('has_image')
+                    ->label('Has Image')
+                    ->placeholder('All Questions')
+                    ->trueLabel('With Images')
+                    ->falseLabel('Without Images'),
             ])
             ->actions([
                 ViewAction::make(),
@@ -253,7 +366,9 @@ class QuestionResource extends Resource
                         ->deselectRecordsAfterCompletion(),
                 ]),
             ])
-            ->defaultSort('id', 'desc');
+            ->defaultSort('id', 'asc')
+            ->paginated([10, 25, 50, 100, 200, 500, -1])
+            ->defaultPaginationPageOption(50);
     }
 
     public static function getRelations(): array

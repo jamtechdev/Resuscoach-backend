@@ -143,7 +143,8 @@ class UserResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        return static::getModel()::count(); // Total users (admins + regular users)
+        // Count only regular users, excluding admins
+        return static::getModel()::where('is_admin', false)->count();
     }
 
     public static function canViewAny(): bool
