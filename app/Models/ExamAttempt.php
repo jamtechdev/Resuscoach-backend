@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ExamAttempt extends Model
@@ -47,6 +48,21 @@ class ExamAttempt extends Model
     public function answers(): HasMany
     {
         return $this->hasMany(ExamAnswer::class, 'attempt_id');
+    }
+
+    /**
+     * Get the questions for this exam attempt (through answers).
+     */
+    public function questions(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Question::class,
+            ExamAnswer::class,
+            'attempt_id', // Foreign key on exam_answers table
+            'id', // Foreign key on questions table
+            'id', // Local key on exam_attempts table
+            'question_id' // Local key on exam_answers table
+        )->orderBy('exam_answers.question_order');
     }
 
     /**

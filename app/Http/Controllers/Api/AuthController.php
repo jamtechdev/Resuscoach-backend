@@ -11,6 +11,7 @@ use App\Http\Resources\UserResource;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 
@@ -363,6 +364,80 @@ HTML;
         return response()->json([
             'success' => true,
             'message' => 'Verification email has been sent.',
+        ]);
+    }
+
+    /**
+     * Manually verify email (for testing purposes only).
+     * Only works in non-production environments.
+     */
+    public function manualVerifyEmail(Request $request, int $id): JsonResponse
+    {
+        // Only allow in development/testing
+        if (app()->environment('production')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This endpoint is not available in production.',
+            ], 403);
+        }
+
+        $user = User::findOrFail($id);
+
+        if ($user->hasVerifiedEmail()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Email already verified.',
+            ], 400);
+        }
+
+        // Manually set email_verified_at without triggering events
+        $user->email_verified_at = now();
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Email verified successfully.',
+            'data' => new UserResource($user),
+        ]);
+    }
+
+    /**
+     * Get password reset token (for testing purposes only).
+     * Only works in non-production environments.
+     */
+    public function getPasswordResetToken(Request $request, string $email): JsonResponse
+    {
+        // Only allow in development/testing
+        if (app()->environment('production')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This endpoint is not available in production.',
+            ], 403);
+        }
+
+        $user = User::where('email', $email)->firstOrFail();
+
+        // Get the latest reset token from database
+        $tokenRecord = DB::table('password_reset_tokens')
+            ->where('email', $email)
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        if (!$tokenRecord) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No password reset token found. Please request a password reset first.',
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'email' => $email,
+                'token' => $tokenRecord->token,
+                'created_at' => $tokenRecord->created_at,
+            ],
+            'message' => 'Password reset token retrieved. Use this token to reset the password.',
         ]);
     }
 }
