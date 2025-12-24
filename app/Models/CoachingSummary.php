@@ -14,15 +14,16 @@ class CoachingSummary extends Model
         'session_id',
         'attempt_id',
         'user_id',
+        'summary_content',
         'questions_reviewed',
         'key_learning_points',
         'guidelines_referenced',
-        'overall_feedback',
     ];
 
     protected function casts(): array
     {
         return [
+            'summary_content' => 'array',
             'questions_reviewed' => 'array',
             'key_learning_points' => 'array',
             'guidelines_referenced' => 'array',

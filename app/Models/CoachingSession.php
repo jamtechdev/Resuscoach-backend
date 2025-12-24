@@ -16,36 +16,22 @@ class CoachingSession extends Model
         'attempt_id',
         'user_id',
         'started_at',
-        'ended_at',
-        'expires_at',
-        'status',
-        'questions_reviewed',
-        'current_question_id',
-        'current_step',
+        'completed_at',
         'paused_at',
-        'total_pause_seconds',
+        'total_duration_seconds',
+        'questions_reviewed',
+        'status',
     ];
 
     protected function casts(): array
     {
         return [
             'started_at' => 'datetime',
-            'ended_at' => 'datetime',
-            'expires_at' => 'datetime',
+            'completed_at' => 'datetime',
             'paused_at' => 'datetime',
         ];
     }
 
-    /**
-     * Coaching steps in order.
-     */
-    public const STEPS = [
-        'initial_reasoning',
-        'guideline_reveal',
-        'corrected_reasoning',
-        'follow_up',
-        'complete',
-    ];
 
     /**
      * Get the exam attempt for this coaching session.
@@ -61,14 +47,6 @@ class CoachingSession extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
-    }
-
-    /**
-     * Get the current question being discussed.
-     */
-    public function currentQuestion(): BelongsTo
-    {
-        return $this->belongsTo(Question::class, 'current_question_id');
     }
 
     /**
@@ -88,35 +66,11 @@ class CoachingSession extends Model
     }
 
     /**
-     * Check if the session is expired.
-     */
-    public function isExpired(): bool
-    {
-        if ($this->status === 'paused') {
-            return false; // Paused sessions don't expire
-        }
-        return $this->expires_at->isPast() && $this->status === 'in_progress';
-    }
-
-    /**
      * Check if the session is active.
      */
     public function isActive(): bool
     {
-        return $this->status === 'in_progress' && !$this->isExpired();
-    }
-
-    /**
-     * Get the effective remaining time accounting for pauses.
-     */
-    public function getRemainingSecondsAttribute(): int
-    {
-        if (!in_array($this->status, ['in_progress', 'paused'])) {
-            return 0;
-        }
-
-        $remaining = $this->expires_at->diffInSeconds(now(), false);
-        return max(0, -$remaining);
+        return $this->status === 'in_progress';
     }
 
     /**
@@ -138,26 +92,11 @@ class CoachingSession extends Model
     {
         if ($this->status === 'paused' && $this->paused_at) {
             $pausedSeconds = $this->paused_at->diffInSeconds(now());
-            $this->total_pause_seconds += $pausedSeconds;
-            $this->expires_at = $this->expires_at->addSeconds($pausedSeconds);
+            $this->total_duration_seconds += $pausedSeconds;
             $this->paused_at = null;
             $this->status = 'in_progress';
             $this->save();
         }
-    }
-
-    /**
-     * Move to the next coaching step.
-     */
-    public function nextStep(): ?string
-    {
-        $currentIndex = array_search($this->current_step, self::STEPS);
-        if ($currentIndex !== false && $currentIndex < count(self::STEPS) - 1) {
-            $this->current_step = self::STEPS[$currentIndex + 1];
-            $this->save();
-            return $this->current_step;
-        }
-        return null;
     }
 
     /**

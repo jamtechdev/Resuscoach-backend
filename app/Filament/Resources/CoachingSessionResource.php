@@ -59,23 +59,19 @@ class CoachingSessionResource extends Resource
                             ->options([
                                 'in_progress' => 'In Progress',
                                 'completed' => 'Completed',
-                                'expired' => 'Expired',
                                 'paused' => 'Paused',
                             ])
                             ->required(),
-                        Select::make('current_step')
-                            ->options([
-                                'initial_reasoning' => 'Initial Reasoning',
-                                'guideline_reveal' => 'Guideline Reveal',
-                                'corrected_reasoning' => 'Corrected Reasoning',
-                                'follow_up' => 'Follow Up',
-                                'complete' => 'Complete',
-                            ]),
                         TextInput::make('questions_reviewed')
                             ->numeric()
                             ->default(0),
+                        TextInput::make('total_duration_seconds')
+                            ->label('Total Duration (seconds)')
+                            ->numeric()
+                            ->default(0),
                         DateTimePicker::make('started_at'),
-                        DateTimePicker::make('ended_at'),
+                        DateTimePicker::make('completed_at'),
+                        DateTimePicker::make('paused_at'),
                     ])
                     ->columns(2),
             ]);
@@ -100,30 +96,22 @@ class CoachingSessionResource extends Resource
                     ->color(fn(string $state): string => match ($state) {
                         'in_progress' => 'warning',
                         'completed' => 'success',
-                        'expired' => 'danger',
                         'paused' => 'info',
                         default => 'gray',
-                    }),
-                TextColumn::make('current_step')
-                    ->label('Current Step')
-                    ->badge()
-                    ->formatStateUsing(fn(?string $state): string => match ($state) {
-                        'initial_reasoning' => 'Initial Reasoning',
-                        'guideline_reveal' => 'Guideline Reveal',
-                        'corrected_reasoning' => 'Corrected Reasoning',
-                        'follow_up' => 'Follow Up',
-                        'complete' => 'Complete',
-                        default => '-',
                     }),
                 TextColumn::make('questions_reviewed')
                     ->label('Questions Reviewed')
                     ->sortable(),
+                TextColumn::make('total_duration_seconds')
+                    ->label('Duration (sec)')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('started_at')
                     ->label('Started')
                     ->dateTime()
                     ->sortable(),
-                TextColumn::make('ended_at')
-                    ->label('Ended')
+                TextColumn::make('completed_at')
+                    ->label('Completed')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -133,7 +121,6 @@ class CoachingSessionResource extends Resource
                     ->options([
                         'in_progress' => 'In Progress',
                         'completed' => 'Completed',
-                        'expired' => 'Expired',
                         'paused' => 'Paused',
                     ]),
                 SelectFilter::make('user')

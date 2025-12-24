@@ -20,7 +20,7 @@ return new class extends Migration
             $table->decimal('score', 5, 2)->nullable(); // Final percentage score
             $table->unsignedTinyInteger('total_questions')->default(40);
             $table->unsignedTinyInteger('correct_count')->default(0);
-            $table->enum('status', ['in_progress', 'completed', 'expired'])->default('in_progress');
+            $table->enum('status', ['in_progress', 'completed', 'abandoned'])->default('in_progress');
             $table->timestamps();
 
             // Indexes

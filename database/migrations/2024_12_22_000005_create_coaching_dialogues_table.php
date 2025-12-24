@@ -15,21 +15,19 @@ return new class extends Migration
             $table->id();
             $table->foreignId('session_id')->constrained('coaching_sessions')->onDelete('cascade');
             $table->foreignId('question_id')->constrained()->onDelete('cascade');
-            $table->enum('role', ['user', 'assistant']);
-            $table->text('content'); // Message text
-            $table->enum('step', [
-                'initial_reasoning',
-                'guideline_reveal',
-                'corrected_reasoning',
-                'follow_up',
-                'complete'
-            ]);
+            $table->unsignedInteger('step_number'); // Position in coaching flow (1-5)
+            $table->text('ai_prompt')->nullable(); // AI prompt/question
+            $table->text('user_response')->nullable(); // User's response
+            $table->enum('response_type', ['text', 'voice'])->nullable(); // How user responded
+            $table->text('ai_feedback')->nullable(); // AI feedback/explanation
+            $table->unsignedInteger('interaction_order'); // Order of interactions
             $table->timestamps();
 
             // Indexes
             $table->index('session_id');
             $table->index('question_id');
-            $table->index('created_at');
+            $table->index('step_number');
+            $table->index('interaction_order');
         });
     }
 

@@ -16,10 +16,10 @@ return new class extends Migration
             $table->foreignId('session_id')->constrained('coaching_sessions')->onDelete('cascade');
             $table->foreignId('attempt_id')->constrained('exam_attempts')->onDelete('cascade');
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
+            $table->json('summary_content'); // Structured summary (JSON)
             $table->json('questions_reviewed'); // List of questions reviewed with details
             $table->json('key_learning_points'); // Main learning points
             $table->json('guidelines_referenced'); // List of guidelines used
-            $table->text('overall_feedback'); // AI overall feedback text
             $table->timestamps();
 
             // Indexes

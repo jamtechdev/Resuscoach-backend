@@ -70,7 +70,15 @@ class ExamAttempt extends Model
      */
     public function isExpired(): bool
     {
-        return $this->expires_at->isPast() && $this->status === 'in_progress';
+        return $this->expires_at && $this->expires_at->isPast() && $this->status === 'in_progress';
+    }
+
+    /**
+     * Check if the exam is abandoned.
+     */
+    public function isAbandoned(): bool
+    {
+        return $this->status === 'abandoned';
     }
 
     /**

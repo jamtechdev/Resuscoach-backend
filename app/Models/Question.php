@@ -61,13 +61,6 @@ class Question extends Model
         return $this->hasMany(CoachingDialogue::class);
     }
 
-    /**
-     * Get the coaching sessions currently on this question.
-     */
-    public function coachingSessions(): HasMany
-    {
-        return $this->hasMany(CoachingSession::class, 'current_question_id');
-    }
 
     /**
      * Scope to get only active questions.

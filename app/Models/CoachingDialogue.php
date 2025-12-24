@@ -13,9 +13,12 @@ class CoachingDialogue extends Model
     protected $fillable = [
         'session_id',
         'question_id',
-        'role',
-        'content',
-        'step',
+        'step_number',
+        'ai_prompt',
+        'user_response',
+        'response_type',
+        'ai_feedback',
+        'interaction_order',
     ];
 
     /**
@@ -35,42 +38,18 @@ class CoachingDialogue extends Model
     }
 
     /**
-     * Check if this message is from the user.
+     * Scope to get interactions for a specific step number.
      */
-    public function isUserMessage(): bool
+    public function scopeForStepNumber($query, int $stepNumber)
     {
-        return $this->role === 'user';
+        return $query->where('step_number', $stepNumber);
     }
 
     /**
-     * Check if this message is from the assistant.
+     * Scope to get interactions ordered by interaction order.
      */
-    public function isAssistantMessage(): bool
+    public function scopeOrdered($query)
     {
-        return $this->role === 'assistant';
-    }
-
-    /**
-     * Scope to get only user messages.
-     */
-    public function scopeFromUser($query)
-    {
-        return $query->where('role', 'user');
-    }
-
-    /**
-     * Scope to get only assistant messages.
-     */
-    public function scopeFromAssistant($query)
-    {
-        return $query->where('role', 'assistant');
-    }
-
-    /**
-     * Scope to get messages for a specific step.
-     */
-    public function scopeForStep($query, string $step)
-    {
-        return $query->where('step', $step);
+        return $query->orderBy('interaction_order');
     }
 }
