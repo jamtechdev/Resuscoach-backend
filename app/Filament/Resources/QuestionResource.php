@@ -112,6 +112,36 @@ class QuestionResource extends Resource
                             ->rows(6)
                             ->columnSpanFull()
                             ->helperText('Explain why the correct answer is right and why others are wrong. Include rationale for correct answer and other options.'),
+
+                        // External Reference Links (under explanation)
+                        Repeater::make('references')
+                            ->label('External Reference Links')
+                            ->schema([
+                                TextInput::make('title')
+                                    ->label('Link Title')
+                                    ->required()
+                                    ->placeholder('e.g., NICE Guidelines, Research Paper Title')
+                                    ->maxLength(255)
+                                    ->columnSpan(2),
+                                TextInput::make('url')
+                                    ->label('URL')
+                                    ->url()
+                                    ->required()
+                                    ->placeholder('https://www.nice.org.uk/guidance/...')
+                                    ->maxLength(500)
+                                    ->columnSpan(2),
+                            ])
+                            ->itemLabel(function (array $state): ?string {
+                                return !empty($state['title']) ? $state['title'] : 'Reference Link';
+                            })
+                            ->addActionLabel('Add Reference Link')
+                            ->defaultItems(0)
+                            ->collapsible()
+                            ->reorderable()
+                            ->collapsed(false)
+                            ->columnSpanFull()
+                            ->helperText('Add external links to reference materials, guidelines, or research papers related to this question.'),
+
                         Textarea::make('guideline_reference')
                             ->label('Guideline Reference')
                             ->rows(2)

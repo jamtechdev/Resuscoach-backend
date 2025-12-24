@@ -32,6 +32,9 @@ Route::prefix('v1')->group(function () {
 
         // Exam routes
         Route::prefix('exams')->name('api.exams.')->group(function () {
+            Route::get('/topics', [ExamController::class, 'getTopics'])->name('topics');
+            Route::get('/history', [ExamController::class, 'history'])->name('history');
+            Route::get('/check-in-progress', [ExamController::class, 'checkInProgress'])->name('check-in-progress');
             Route::post('/start', [ExamController::class, 'start'])->name('start');
             Route::get('/{id}', [ExamController::class, 'show'])->name('show');
             Route::post('/{id}/answer', [ExamController::class, 'submitAnswer'])->name('answer');

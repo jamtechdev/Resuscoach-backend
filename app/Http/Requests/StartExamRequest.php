@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StartExamRequest extends FormRequest
 {
@@ -14,7 +15,16 @@ class StartExamRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // No input required - exam starts automatically
+            'topic' => ['sometimes', 'string', 'max:255'],
+            'subtopic' => ['sometimes', 'string', 'max:255'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'topic.string' => 'Topic must be a valid string.',
+            'subtopic.string' => 'Subtopic must be a valid string.',
         ];
     }
 }

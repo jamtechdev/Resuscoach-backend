@@ -20,6 +20,52 @@ use Illuminate\Support\Facades\Log;
 class ExamController extends Controller
 {
     /**
+     * Get available topics and subtopics for exam filtering.
+     */
+    public function getTopics(): JsonResponse
+    {
+        try {
+            // Get all unique topics with their subtopics
+            $topics = Question::where('is_active', true)
+                ->select('topic', 'subtopic')
+                ->distinct()
+                ->get()
+                ->groupBy('topic')
+                ->map(function ($questions, $topic) {
+                    $subtopics = $questions
+                        ->whereNotNull('subtopic')
+                        ->pluck('subtopic')
+                        ->unique()
+                        ->values()
+                        ->toArray();
+
+                    return [
+                        'topic' => $topic,
+                        'subtopics' => $subtopics,
+                        'question_count' => Question::where('is_active', true)
+                            ->where('topic', $topic)
+                            ->count(),
+                    ];
+                })
+                ->values();
+
+            return response()->json([
+                'success' => true,
+                'data' => $topics,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch topics', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch topics.',
+            ], 500);
+        }
+    }
+
+    /**
      * Start a new exam attempt.
      *
      * Randomly selects 40 active questions and creates an exam attempt.
@@ -44,16 +90,44 @@ class ExamController extends Controller
                 ], 409);
             }
 
-            // Get 40 random active questions
-            $questions = Question::where('is_active', true)
-                ->inRandomOrder()
+            // Build query for questions with optional topic/subtopic filtering
+            $query = Question::where('is_active', true);
+
+            // Filter by topic if provided
+            if ($request->has('topic') && !empty($request->topic)) {
+                $query->where('topic', $request->topic);
+            }
+
+            // Filter by subtopic if provided (only if topic is also provided)
+            if ($request->has('subtopic') && !empty($request->subtopic)) {
+                $query->where('subtopic', $request->subtopic);
+            }
+
+            // Get available questions count for better error message
+            $availableCount = $query->count();
+
+            // Get 40 random questions (or all available if less than 40)
+            $questions = $query->inRandomOrder()
                 ->limit(40)
                 ->get();
 
             if ($questions->count() < 40) {
+                $filterMessage = '';
+                if ($request->has('topic') && !empty($request->topic)) {
+                    $filterMessage = " for topic '{$request->topic}'";
+                    if ($request->has('subtopic') && !empty($request->subtopic)) {
+                        $filterMessage .= " and subtopic '{$request->subtopic}'";
+                    }
+                }
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Not enough questions available. Please contact administrator.',
+                    'message' => "Not enough questions available{$filterMessage}. Found {$availableCount} question(s), but need 40. Please select a different topic or contact administrator.",
+                    'data' => [
+                        'available_questions' => $availableCount,
+                        'requested_topic' => $request->topic ?? null,
+                        'requested_subtopic' => $request->subtopic ?? null,
+                    ],
                 ], 503);
             }
 
@@ -389,6 +463,79 @@ class ExamController extends Controller
             'correct_count' => $correctCount,
             'score' => round($score, 2),
         ]);
+    }
+
+    /**
+     * Get user's exam history.
+     */
+    public function history(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            $exams = ExamAttempt::where('user_id', $user->id)
+                ->orderBy('started_at', 'desc')
+                ->paginate(20);
+
+            return response()->json([
+                'success' => true,
+                'data' => ExamAttemptResource::collection($exams->items()),
+                'meta' => [
+                    'current_page' => $exams->currentPage(),
+                    'last_page' => $exams->lastPage(),
+                    'per_page' => $exams->perPage(),
+                    'total' => $exams->total(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch exam history', [
+                'user_id' => $request->user()->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch exam history.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Check if user has an in-progress exam.
+     */
+    public function checkInProgress(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            $inProgressExam = ExamAttempt::where('user_id', $user->id)
+                ->where('status', 'in_progress')
+                ->first();
+
+            if ($inProgressExam && !$inProgressExam->isExpired()) {
+                return response()->json([
+                    'success' => true,
+                    'has_in_progress' => true,
+                    'data' => new ExamAttemptResource($inProgressExam->load(['answers.question'])),
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'has_in_progress' => false,
+                'data' => null,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to check in-progress exam', [
+                'user_id' => $request->user()->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to check exam status.',
+            ], 500);
+        }
     }
 
     /**
