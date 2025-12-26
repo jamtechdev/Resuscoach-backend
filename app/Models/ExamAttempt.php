@@ -110,12 +110,13 @@ class ExamAttempt extends Model
      */
     public function getRemainingSecondsAttribute(): int
     {
-        if ($this->status !== 'in_progress') {
+        if ($this->status !== 'in_progress' || !$this->expires_at) {
             return 0;
         }
 
-        $remaining = $this->expires_at->diffInSeconds(now(), false);
-        return max(0, -$remaining);
+        // Calculate seconds remaining until expires_at
+        $remaining = now()->diffInSeconds($this->expires_at, false);
+        return max(0, $remaining);
     }
 
     /**

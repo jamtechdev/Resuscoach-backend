@@ -34,20 +34,28 @@ class ExamAttemptResource extends JsonResource
             'correct_count' => $showResults ? $this->correct_count : null,
             'percentage' => $showResults ? round($this->score ?? 0, 2) : null,
 
-            // Questions (extracted from answers) and answers
+            // Questions (extracted from answers, sorted by question_order) and answers
             'questions' => $this->when(
                 $this->relationLoaded('answers'),
                 function () {
-                    $questions = $this->answers
+                    // Sort answers by question_order, then extract questions
+                    $sortedAnswers = $this->answers->sortBy('question_order')->values();
+                    $questions = $sortedAnswers
                         ->map(fn($answer) => $answer->question)
                         ->filter()
-                        ->unique('id')
-                        ->sortBy(fn($question, $key) => $this->answers->firstWhere('question_id', $question->id)->question_order ?? 0)
                         ->values();
                     return ExamQuestionResource::collection($questions);
                 }
             ),
-            'answers' => ExamAnswerResource::collection($this->whenLoaded('answers')),
+            // Answers sorted by question_order for easier frontend consumption
+            'answers' => $this->when(
+                $this->relationLoaded('answers'),
+                function () {
+                    return ExamAnswerResource::collection(
+                        $this->answers->sortBy('question_order')->values()
+                    );
+                }
+            ),
 
             // User info
             'user' => new UserResource($this->whenLoaded('user')),
