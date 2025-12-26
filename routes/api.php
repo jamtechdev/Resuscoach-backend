@@ -17,6 +17,11 @@ Route::prefix('v1')->group(function () {
         ->middleware(['signed'])
         ->name('verification.verify');
 
+    // Public exam routes (metadata only, no sensitive data)
+    Route::prefix('exams')->name('api.exams.')->group(function () {
+        Route::get('/topics', [ExamController::class, 'getTopics'])->name('topics');
+    });
+
     // Protected routes
     Route::middleware('auth:sanctum')->group(function () {
         // Authentication routes
@@ -30,9 +35,8 @@ Route::prefix('v1')->group(function () {
             Route::get('/password/reset-token/{email}', [AuthController::class, 'getPasswordResetToken']);
         }
 
-        // Exam routes
+        // Protected exam routes
         Route::prefix('exams')->name('api.exams.')->group(function () {
-            Route::get('/topics', [ExamController::class, 'getTopics'])->name('topics');
             Route::get('/history', [ExamController::class, 'history'])->name('history');
             Route::get('/check-in-progress', [ExamController::class, 'checkInProgress'])->name('check-in-progress');
             Route::post('/start', [ExamController::class, 'start'])->name('start');

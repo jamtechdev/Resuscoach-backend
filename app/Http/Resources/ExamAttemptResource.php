@@ -47,6 +47,7 @@ class ExamAttemptResource extends JsonResource
                     return ExamQuestionResource::collection($questions);
                 }
             ),
+
             // Answers sorted by question_order for easier frontend consumption
             'answers' => $this->when(
                 $this->relationLoaded('answers'),

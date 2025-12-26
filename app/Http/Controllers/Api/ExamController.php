@@ -21,17 +21,18 @@ class ExamController extends Controller
 {
     /**
      * Get available topics and subtopics for exam filtering.
+     * Returns all active topics with their subtopics and question counts.
+     * This is available to all authenticated users to help them filter exams.
      */
     public function getTopics(): JsonResponse
     {
         try {
-            // Get all unique topics with their subtopics
+            // Get all active questions grouped by topic
             $topics = Question::where('is_active', true)
-                ->select('topic', 'subtopic')
-                ->distinct()
                 ->get()
                 ->groupBy('topic')
                 ->map(function ($questions, $topic) {
+                    // Get unique subtopics for this topic
                     $subtopics = $questions
                         ->whereNotNull('subtopic')
                         ->pluck('subtopic')
@@ -42,12 +43,11 @@ class ExamController extends Controller
                     return [
                         'topic' => $topic,
                         'subtopics' => $subtopics,
-                        'question_count' => Question::where('is_active', true)
-                            ->where('topic', $topic)
-                            ->count(),
+                        'question_count' => $questions->count(),
                     ];
                 })
-                ->values();
+                ->values()
+                ->sortBy('topic'); // Sort alphabetically for better UX
 
             return response()->json([
                 'success' => true,
@@ -56,6 +56,7 @@ class ExamController extends Controller
         } catch (\Exception $e) {
             Log::error('Failed to fetch topics', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
