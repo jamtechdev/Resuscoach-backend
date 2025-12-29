@@ -72,7 +72,8 @@ class ExamController extends Controller
     /**
      * Start a new exam attempt.
      *
-     * Randomly selects 40 active questions and creates an exam attempt.
+     * Randomly selects up to 40 active questions (or all available if less than 40)
+     * based on optional topic/subtopic filters and creates an exam attempt.
      */
     public function start(StartExamRequest $request): JsonResponse
     {
@@ -107,33 +108,13 @@ class ExamController extends Controller
                 $query->where('subtopic', $request->subtopic);
             }
 
-            // Get available questions count for better error message
-            $availableCount = $query->count();
-
-            // Get 40 random questions (or all available if less than 40)
+            // Get up to 40 random questions (or all available if less than 40)
             $questions = $query->inRandomOrder()
                 ->limit(40)
                 ->get();
 
-            if ($questions->count() < 40) {
-                $filterMessage = '';
-                if ($request->has('topic') && !empty($request->topic)) {
-                    $filterMessage = " for topic '{$request->topic}'";
-                    if ($request->has('subtopic') && !empty($request->subtopic)) {
-                        $filterMessage .= " and subtopic '{$request->subtopic}'";
-                    }
-                }
-
-                return response()->json([
-                    'success' => false,
-                    'message' => "Not enough questions available{$filterMessage}. Found {$availableCount} question(s), but need 40. Please select a different topic or contact administrator.",
-                    'data' => [
-                        'available_questions' => $availableCount,
-                        'requested_topic' => $request->topic ?? null,
-                        'requested_subtopic' => $request->subtopic ?? null,
-                    ],
-                ], 503);
-            }
+            // Use actual count of questions retrieved
+            $questionCount = $questions->count();
 
             DB::beginTransaction();
 
@@ -143,7 +124,7 @@ class ExamController extends Controller
                     'user_id' => $user->id,
                     'started_at' => now(),
                     'expires_at' => now()->addMinutes(45), // 45 minutes = 2700 seconds
-                    'total_questions' => 40,
+                    'total_questions' => $questionCount, // Use actual count of questions available
                     'status' => 'in_progress',
                 ]);
 
