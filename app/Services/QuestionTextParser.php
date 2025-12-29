@@ -263,7 +263,7 @@ class QuestionTextParser
             // Clean up extra whitespace but preserve line breaks for readability
             // Only normalize spaces/tabs within lines, not across line breaks
             $lines = explode("\n", $stem);
-            $lines = array_map(function($line) {
+            $lines = array_map(function ($line) {
                 return preg_replace('/[ \t]+/', ' ', trim($line));
             }, $lines);
             $stem = implode("\n", array_filter($lines)); // Remove empty lines
