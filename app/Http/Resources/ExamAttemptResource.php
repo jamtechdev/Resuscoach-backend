@@ -29,6 +29,29 @@ class ExamAttemptResource extends JsonResource
             'is_expired' => $this->isExpired(),
             'is_in_progress' => $this->isInProgress(),
 
+            // Exam instructions
+            'instructions' => [
+                'title' => 'Exam Instructions',
+                'duration' => 'You have 45 minutes to complete this exam.',
+                'total_questions' => "This exam contains {$this->total_questions} questions.",
+                'rules' => [
+                    'Read each question carefully before selecting your answer.',
+                    'You can navigate between questions at any time.',
+                    'You can flag questions to review later.',
+                    'You can change your answers before submitting the exam.',
+                    'Once you submit the exam, you cannot make any changes.',
+                    'The exam will automatically submit when the time expires.',
+                    'Each question has only one correct answer.',
+                    'Select the best answer from options A, B, C, D, or E.',
+                ],
+                'tips' => [
+                    'Manage your time wisely - you have approximately 1 minute per question.',
+                    'Answer all questions - unanswered questions will be marked as incorrect.',
+                    'Use the flag feature to mark questions you want to review.',
+                    'Review your flagged questions before submitting.',
+                ],
+            ],
+
             // Results (only shown when completed or on results endpoint)
             'score' => $showResults ? $this->score : null,
             'correct_count' => $showResults ? $this->correct_count : null,
