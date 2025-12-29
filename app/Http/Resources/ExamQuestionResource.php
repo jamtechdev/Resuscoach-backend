@@ -16,7 +16,8 @@ class ExamQuestionResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'stem' => $this->stem,
+            'scenario' => $this->scenario, // Clinical scenario/vignette (optional)
+            'stem' => $this->stem, // The actual question text
             'options' => [
                 'A' => $this->option_a,
                 'B' => $this->option_b,

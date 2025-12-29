@@ -53,6 +53,7 @@ class QuestionImport implements ToModel, WithHeadingRow, WithValidation, SkipsEm
 
         return new Question([
             'question_number' => $row['question_number'] ?? null,
+            'scenario' => $row['scenario'] ?? $row['vignette'] ?? $row['clinical_scenario'] ?? null,
             'stem' => $row['stem'] ?? $row['question'] ?? $row['question_stem'] ?? '',
             'option_a' => $row['option_a'] ?? $row['option_a_text'] ?? '',
             'option_b' => $row['option_b'] ?? $row['option_b_text'] ?? '',

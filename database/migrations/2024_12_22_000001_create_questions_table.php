@@ -13,7 +13,8 @@ return new class extends Migration
     {
         Schema::create('questions', function (Blueprint $table) {
             $table->id();
-            $table->text('stem'); // Question text/vignette
+            $table->text('scenario')->nullable(); // Clinical scenario/vignette (the patient presentation)
+            $table->text('stem'); // The actual question text
             $table->text('option_a');
             $table->text('option_b');
             $table->text('option_c');

@@ -64,14 +64,14 @@ class QuestionTextParser
                 continue;
             }
 
-            // Detect start of new question
-            // Questions start with patterns like:
-            // - "A XX-year-old"
-            // - "What is"
-            // - Numbered "1. "
-            // - Questions ending with "?"
+            // Detect start of new question block (only for numbered questions or clear separators)
+            // Don't treat question words like "What is" as new question starts - they're part of the scenario
             $isQuestionStart = false;
-            if (preg_match('/^(A \d+[-–]year|What is|^\d+\.\s+[A-Z]|^[A-Z][^?]{15,}\?)/i', $trimmedLine)) {
+            // Only treat as new question if:
+            // - Numbered question (1. or Question 1:)
+            // - Clinical scenario starter (A XX-year-old, You are)
+            // - But NOT just question words (What is, Which, etc.) - those are part of the question text
+            if (preg_match('/^(A \d+[-–](year|month|week|day)|You are|^\d+\.\s+[A-Z]|^Question\s+\d+[:\s])/i', $trimmedLine)) {
                 $isQuestionStart = true;
             }
 
@@ -88,6 +88,7 @@ class QuestionTextParser
                 }
                 $currentBlock = [$line];
             } else {
+                // Always add to current block - question words are part of the question text, not separators
                 $currentBlock[] = $line;
             }
         }
@@ -164,10 +165,20 @@ class QuestionTextParser
 
     private function extractQuestion(string $block, ?string $cp, ?string $cc, int $number, string $topic = 'Cardiology'): ?array
     {
-        // Extract stem
-        $stem = $this->extractStem($block);
-        if (empty($stem) || strlen($stem) < 20) {
+        // Extract scenario and stem (question text)
+        $scenarioAndStem = $this->extractStem($block);
+        if (empty($scenarioAndStem) || strlen($scenarioAndStem) < 20) {
             return null;
+        }
+
+        // Separate scenario from question
+        $scenario = $this->extractScenario($scenarioAndStem);
+        $stem = $this->extractQuestionText($scenarioAndStem);
+
+        // If we couldn't separate them, put everything in stem (backward compatibility)
+        if (empty($stem)) {
+            $stem = $scenarioAndStem;
+            $scenario = null;
         }
 
         // Extract options
@@ -196,6 +207,7 @@ class QuestionTextParser
 
         return [
             'question_number' => $number,
+            'scenario' => $scenario,
             'stem' => $stem,
             'option_a' => $options['A'] ?? '',
             'option_b' => $options['B'] ?? '',
@@ -226,29 +238,137 @@ class QuestionTextParser
         $block = trim($block);
 
         // Find everything before the first option (A. or Option A)
-        if (preg_match('/^(.*?)(?=^\s*A\.\s|^Option A|^\s*[A-E]\.\s+[A-Z])/sm', $block, $match)) {
+        // This includes the full clinical scenario/vignette AND the question
+        // Use a more flexible pattern that captures everything up to the first option line
+        // Match: "A. ", "A.", "Option A:", etc. at start of line
+        if (preg_match('/^(.*?)(?=^\s*[A-E][\.:]\s|^Option\s+[A-E][:\s]|^\s*[A-E]\.\s+[A-Z])/sm', $block, $match)) {
             $stem = trim($match[1]);
 
-            // Remove leading numbers
-            $stem = preg_replace('/^\d+\.\s*/', '', $stem);
+            // Remove leading question numbers (like "1. " or "Question 1:" or "a. ")
+            $stem = preg_replace('/^(Question\s+)?[a-z]?[0-9]+[\.:]\s*/i', '', $stem);
 
             // Remove any remaining CP/CC references
             $stem = preg_replace('/^(CP\d+|CC\d+)[^\n]*\n?/m', '', $stem);
 
-            // Extract the question part (should end with ?)
-            if (preg_match('/(.*?\?)/s', $stem, $qMatch)) {
-                $stem = trim($qMatch[1]);
-            }
+            // Remove "Correct Answer" lines that might appear before options
+            $stem = preg_replace('/Correct\s+answer[:\s]+[A-E]\.?\s*[^\n]*\n?/i', '', $stem);
+            $stem = preg_replace('/Correct\s+Answer[:\s]+[A-E]\.?\s*[^\n]*\n?/i', '', $stem);
 
+            // Remove "Explanation:" or "Rationale" sections that might appear before options
+            $stem = preg_replace('/\n\s*(Explanation|Rationale|Rationale\s+for|Rationale\s+Against)[:\s].*$/is', '', $stem);
+
+            // Remove "Reference:" sections that might appear before options
+            $stem = preg_replace('/\n\s*Reference[s]?[:\s].*$/is', '', $stem);
+
+            // Clean up extra whitespace but preserve line breaks for readability
+            // Only normalize spaces/tabs within lines, not across line breaks
+            $lines = explode("\n", $stem);
+            $lines = array_map(function($line) {
+                return preg_replace('/[ \t]+/', ' ', trim($line));
+            }, $lines);
+            $stem = implode("\n", array_filter($lines)); // Remove empty lines
+            $stem = preg_replace('/\n{3,}/', "\n\n", $stem); // Max 2 line breaks
             $stem = trim($stem);
 
-            // Must have at least 20 characters and contain a question mark or question words
-            if (strlen($stem) >= 20 && (strpos($stem, '?') !== false || preg_match('/(what|which|how|why|when|where|who)/i', $stem))) {
+            // Must have at least 20 characters
+            // The clinical scenario before the question is valid content
+            if (strlen($stem) >= 20) {
                 return $stem;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Extract the clinical scenario/vignette (everything before the actual question).
+     */
+    private function extractScenario(string $fullText): ?string
+    {
+        // Split by lines to find where the question starts
+        $lines = explode("\n", $fullText);
+        $scenarioLines = [];
+
+        foreach ($lines as $line) {
+            $trimmedLine = trim($line);
+
+            // Stop when we find a line that looks like a question
+            // Questions typically:
+            // - End with ?
+            // - Start with question words (What, Which, How, etc.)
+            // - Are relatively short (questions are usually 1-2 lines)
+            if (preg_match('/^(What|Which|How|Why|When|Where|Who|.*\?)$/i', $trimmedLine)) {
+                break; // Found the question, stop collecting scenario
+            }
+
+            // If line is not empty and doesn't look like a question, it's part of scenario
+            if (!empty($trimmedLine) && !preg_match('/^\s*[A-E][\.:]\s/', $trimmedLine)) {
+                $scenarioLines[] = $trimmedLine;
+            }
+        }
+
+        if (empty($scenarioLines)) {
+            return null;
+        }
+
+        $scenario = implode("\n", $scenarioLines);
+        $scenario = preg_replace('/[ \t]+/', ' ', $scenario); // Normalize spaces
+        $scenario = preg_replace('/\n{3,}/', "\n\n", $scenario); // Max 2 line breaks
+        $scenario = trim($scenario);
+
+        // Only return if it's substantial
+        return strlen($scenario) > 30 ? $scenario : null;
+    }
+
+    /**
+     * Extract just the question text (the part with the question mark or question words).
+     */
+    private function extractQuestionText(string $fullText): ?string
+    {
+        // Split by lines to find the question
+        $lines = explode("\n", $fullText);
+        $questionLines = [];
+        $foundQuestion = false;
+
+        foreach ($lines as $line) {
+            $trimmedLine = trim($line);
+
+            // Skip empty lines and option markers
+            if (empty($trimmedLine) || preg_match('/^\s*[A-E][\.:]\s/', $trimmedLine)) {
+                if ($foundQuestion) {
+                    break; // We've passed the question, stop
+                }
+                continue;
+            }
+
+            // Check if this line looks like a question
+            if (preg_match('/^(What|Which|How|Why|When|Where|Who|.*\?)/i', $trimmedLine)) {
+                $foundQuestion = true;
+                $questionLines[] = $trimmedLine;
+            } elseif ($foundQuestion) {
+                // If we already found the question, continue collecting until we hit options
+                if (!preg_match('/^\s*[A-E][\.:]\s/', $trimmedLine)) {
+                    $questionLines[] = $trimmedLine;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if (empty($questionLines)) {
+            // Fallback: look for any line ending with ?
+            foreach ($lines as $line) {
+                $trimmedLine = trim($line);
+                if (preg_match('/\?$/', $trimmedLine) && strlen($trimmedLine) > 10) {
+                    return $trimmedLine;
+                }
+            }
+            return null;
+        }
+
+        $question = implode(' ', $questionLines);
+        $question = preg_replace('/[ \t]+/', ' ', $question);
+        return trim($question);
     }
 
     private function extractOptions(string $block): array
@@ -288,12 +408,13 @@ class QuestionTextParser
     private function extractCorrectAnswer(string $block): ?string
     {
         $patterns = [
+            '/Correct\s+Answer[:\s]+([A-E])\./i',  // "Correct Answer: D." format
+            '/Correct\s+Answer[:\s]+([A-E])/i',   // "Correct Answer: D" format
             '/The\s+(?:most\s+)?(?:appropriate|correct|best|next\s+best\s+step)\s+(?:answer|step|treatment|initial\s+treatment|next\s+step)[:\s]+([A-E])/i',
             '/The\s+next\s+best\s+step\s+is\s+([A-E])/i',
             '/correct\s+answer[:\s]+([A-E])/i',
             '/answer[:\s]+([A-E])/i',
             '/is\s+([A-E])\./i',
-            '/Correct answer:?\s*([A-E])/i',
             '/The\s+answer\s+is\s+([A-E])/i',
             '/The\s+correct\s+answer\s+is\s+([A-E])/i',
         ];
@@ -312,13 +433,49 @@ class QuestionTextParser
 
     private function extractExplanation(string $block): ?string
     {
+        // First, try to extract the full explanation including "Rationale Against Incorrect Answers"
+        // Handle variations: "Rationale", "Rationale for the Correct Answer", "Rationale for Correct Answer"
+        $explanation = null;
+
+        // Try to match "Rationale for the Correct Answer" or "Rationale for Correct Answer" first
+        if (preg_match('/Rationale\s+for\s+(?:the\s+)?(?:Correct\s+)?Answer[:\s]+(.*?)(?=Rationale\s+Against|References|$)/is', $block, $match)) {
+            $explanation = trim($match[1]);
+        }
+        // Fallback to just "Rationale"
+        elseif (preg_match('/Rationale[:\s]+(.*?)(?=Rationale\s+Against|References|$)/is', $block, $match)) {
+            $explanation = trim($match[1]);
+        }
+
+        if ($explanation) {
+            // Include "Rationale Against Incorrect Answers" if it exists as a separate section
+            if (preg_match('/Rationale\s+Against\s+Incorrect\s+Answers[:\s]+(.*?)(?=References|$)/is', $block, $incorrectMatch)) {
+                $explanation .= "\n\nRationale Against Incorrect Answers:\n" . trim($incorrectMatch[1]);
+            }
+
+            // Clean up the explanation
+            $explanation = preg_replace('/^Why\s+[A-E]\s+is\s+the\s+correct\s+answer[:\s]*/i', '', $explanation);
+            // Remove answer letter prefixes like "D. Duchenne muscular dystrophy."
+            $explanation = preg_replace('/^[A-E]\.\s+[^\n]+\.\s*/i', '', $explanation);
+            // Normalize multiple spaces to single space (but preserve line breaks)
+            $explanation = preg_replace('/[ \t]+/', ' ', $explanation);
+            // Normalize multiple line breaks to double line break
+            $explanation = preg_replace('/\n{3,}/', "\n\n", $explanation);
+            // Clean up spaces around line breaks
+            $explanation = preg_replace('/\n\s+/', "\n", $explanation);
+            $explanation = preg_replace('/\s+\n/', "\n", $explanation);
+
+            if (strlen($explanation) > 50) {
+                return trim($explanation);
+            }
+        }
+
+        // Fallback patterns
         $patterns = [
-            '/Rationale[:\s]+(.*?)(?=References|Why|Differentiating|Rationale on|$)/is',
-            '/Rationale for[:\s]+(.*?)(?=References|Why|Differentiating|Rationale on|$)/is',
-            '/Rationale for Management[:\s]+(.*?)(?=References|Why|Differentiating|Rationale on|$)/is',
-            '/Explanation[:\s]+(.*?)(?=References|Why|Differentiating|Rationale on|$)/is',
-            '/This\s+(?:is|patient|scenario|diagnosis)(.*?)(?=References|Why|Differentiating|Rationale on|$)/is',
-            '/The\s+(?:most\s+)?(?:appropriate|correct|best|likely)(.*?)(?=References|Why|Differentiating|Rationale on|$)/is',
+            '/Rationale for[:\s]+(.*?)(?=References|Rationale Against|$)/is',
+            '/Rationale for Management[:\s]+(.*?)(?=References|Rationale Against|$)/is',
+            '/Explanation[:\s]+(.*?)(?=References|Rationale Against|$)/is',
+            '/This\s+(?:is|patient|scenario|diagnosis)(.*?)(?=References|Rationale Against|$)/is',
+            '/The\s+(?:most\s+)?(?:appropriate|correct|best|likely)(.*?)(?=References|Rationale Against|$)/is',
         ];
 
         foreach ($patterns as $pattern) {

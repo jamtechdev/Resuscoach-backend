@@ -11,6 +11,7 @@ class Question extends Model
     use HasFactory;
 
     protected $fillable = [
+        'scenario',
         'stem',
         'option_a',
         'option_b',

@@ -57,12 +57,17 @@ class QuestionResource extends Resource
                             ->required()
                             ->helperText('Order within the condition (e.g., 1, 2, 3)')
                             ->minValue(1),
-                        Textarea::make('stem')
-                            ->label('Question Stem / Clinical Vignette')
-                            ->required()
-                            ->rows(5)
+                        Textarea::make('scenario')
+                            ->label('Clinical Scenario / Vignette')
+                            ->rows(6)
                             ->columnSpanFull()
-                            ->helperText('Enter the clinical scenario and question text'),
+                            ->helperText('Enter the clinical scenario or patient presentation (e.g., "A 43-year-old man presents with..."). This is optional if the question doesn\'t have a scenario.'),
+                        Textarea::make('stem')
+                            ->label('Question Text')
+                            ->required()
+                            ->rows(3)
+                            ->columnSpanFull()
+                            ->helperText('Enter the actual question text (e.g., "What is the most appropriate initial action?")'),
                     ])
                     ->columns(2),
 

@@ -29,7 +29,7 @@ class ExamAttemptResource extends JsonResource
             'is_expired' => $this->isExpired(),
             'is_in_progress' => $this->isInProgress(),
 
-            // Exam instructions
+            // Exam instructionsimage.png
             'instructions' => [
                 'title' => 'Exam Instructions',
                 'duration' => 'You have 45 minutes to complete this exam.',
