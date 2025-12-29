@@ -33,16 +33,19 @@ class ExamController extends Controller
                 ->groupBy('topic')
                 ->map(function ($questions, $topic) {
                     // Get unique subtopics for this topic
+                    // Filter out null, empty strings, and whitespace-only values
                     $subtopics = $questions
                         ->whereNotNull('subtopic')
                         ->pluck('subtopic')
+                        ->map(fn($subtopic) => trim($subtopic))
+                        ->filter(fn($subtopic) => !empty($subtopic))
                         ->unique()
                         ->values()
                         ->toArray();
 
                     return [
                         'topic' => $topic,
-                        'subtopics' => $subtopics,
+                        'subtopics' => $subtopics, // Will be empty array [] if no subtopics
                         'question_count' => $questions->count(),
                     ];
                 })
