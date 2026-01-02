@@ -8,6 +8,7 @@ use App\Http\Requests\StartExamRequest;
 use App\Http\Requests\SubmitAnswerRequest;
 use App\Http\Requests\SubmitExamRequest;
 use App\Http\Resources\ExamAttemptResource;
+use App\Http\Resources\ExamHistoryResource;
 use App\Http\Resources\ExamResultsResource;
 use App\Models\ExamAttempt;
 use App\Models\ExamAnswer;
@@ -386,6 +387,60 @@ class ExamController extends Controller
     }
 
     /**
+     * Get flagged questions for an exam.
+     * Returns a list of flagged questions for easier navigation.
+     */
+    public function getFlaggedQuestions(Request $request, int $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            $examAttempt = ExamAttempt::where('id', $id)
+                ->where('user_id', $user->id)
+                ->firstOrFail();
+
+            // Check if exam is still in progress
+            if ($examAttempt->status !== 'in_progress') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Can only view flagged questions for in-progress exams.',
+                ], 403);
+            }
+
+            // Get flagged answers with questions
+            $flaggedAnswers = ExamAnswer::where('attempt_id', $examAttempt->id)
+                ->where('is_flagged', true)
+                ->with('question')
+                ->orderBy('question_order')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'flagged_count' => $flaggedAnswers->count(),
+                    'flagged_questions' => \App\Http\Resources\ExamAnswerResource::collection($flaggedAnswers),
+                ],
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Exam not found.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch flagged questions', [
+                'exam_id' => $id,
+                'user_id' => $request->user()->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch flagged questions.',
+            ], 500);
+        }
+    }
+
+    /**
      * Get exam results with detailed breakdown.
      */
     public function results(Request $request, int $id): JsonResponse
@@ -451,25 +506,52 @@ class ExamController extends Controller
     }
 
     /**
-     * Get user's exam history.
+     * Get user's exam history with optional filters.
+     *
+     * Query parameters:
+     * - status: Filter by status (in_progress, completed, abandoned)
+     * - per_page: Number of items per page (default: 20)
+     * - page: Page number (default: 1)
      */
     public function history(Request $request): JsonResponse
     {
         try {
             $user = $request->user();
 
-            $exams = ExamAttempt::where('user_id', $user->id)
-                ->orderBy('started_at', 'desc')
-                ->paginate(20);
+            $query = ExamAttempt::where('user_id', $user->id);
+
+            // Filter by status if provided
+            if ($request->has('status') && in_array($request->status, ['in_progress', 'completed', 'abandoned'])) {
+                $query->where('status', $request->status);
+            }
+
+            // Filter by date range if provided
+            if ($request->has('start_date')) {
+                $query->whereDate('started_at', '>=', $request->start_date);
+            }
+
+            if ($request->has('end_date')) {
+                $query->whereDate('started_at', '<=', $request->end_date);
+            }
+
+            // Order by most recent first
+            $query->orderBy('started_at', 'desc');
+
+            // Pagination
+            $perPage = $request->get('per_page', 20);
+            $perPage = min(max(1, (int)$perPage), 100); // Limit between 1 and 100
+            $exams = $query->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => ExamAttemptResource::collection($exams->items()),
+                'data' => ExamHistoryResource::collection($exams->items()),
                 'meta' => [
                     'current_page' => $exams->currentPage(),
                     'last_page' => $exams->lastPage(),
                     'per_page' => $exams->perPage(),
                     'total' => $exams->total(),
+                    'from' => $exams->firstItem(),
+                    'to' => $exams->lastItem(),
                 ],
             ]);
         } catch (\Exception $e) {
@@ -481,6 +563,131 @@ class ExamController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch exam history.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get user's exam statistics and summary.
+     * Returns comprehensive statistics about the user's exam performance.
+     */
+    public function statistics(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            // Get all user's exam attempts
+            $allExams = ExamAttempt::where('user_id', $user->id);
+            $completedExams = ExamAttempt::where('user_id', $user->id)
+                ->where('status', 'completed');
+            $inProgressExams = ExamAttempt::where('user_id', $user->id)
+                ->where('status', 'in_progress');
+            $abandonedExams = ExamAttempt::where('user_id', $user->id)
+                ->where('status', 'abandoned');
+
+            // Basic counts
+            $totalExams = $allExams->count();
+            $completedCount = $completedExams->count();
+            $inProgressCount = $inProgressExams->count();
+            $abandonedCount = $abandonedExams->count();
+
+            // Score statistics (only for completed exams)
+            $avgScore = $completedExams->avg('score');
+            $bestScore = $completedExams->max('score');
+            $worstScore = $completedExams->min('score');
+
+            // Get best and worst exam attempts
+            $bestExam = $completedExams->orderBy('score', 'desc')->first();
+            $worstExam = $completedExams->orderBy('score', 'asc')->first();
+
+            // Recent activity (last 5 exams)
+            $recentExams = $allExams->orderBy('started_at', 'desc')
+                ->limit(5)
+                ->get();
+
+            // Performance trend (last 10 completed exams)
+            $recentScores = $completedExams->orderBy('completed_at', 'desc')
+                ->limit(10)
+                ->pluck('score')
+                ->reverse()
+                ->values();
+
+            // Calculate improvement trend
+            $improvementTrend = null;
+            if ($recentScores->count() >= 2) {
+                $firstHalf = $recentScores->take(ceil($recentScores->count() / 2))->avg();
+                $secondHalf = $recentScores->skip(floor($recentScores->count() / 2))->avg();
+                $improvementTrend = $secondHalf > $firstHalf ? 'improving' : ($secondHalf < $firstHalf ? 'declining' : 'stable');
+            }
+
+            // Topic-wise performance (if we have completed exams with answers)
+            $topicPerformance = [];
+            if ($completedCount > 0) {
+                $topicStats = DB::table('exam_attempts')
+                    ->join('exam_answers', 'exam_attempts.id', '=', 'exam_answers.attempt_id')
+                    ->join('questions', 'exam_answers.question_id', '=', 'questions.id')
+                    ->where('exam_attempts.user_id', $user->id)
+                    ->where('exam_attempts.status', 'completed')
+                    ->select(
+                        'questions.topic',
+                        DB::raw('COUNT(*) as total_questions'),
+                        DB::raw('SUM(CASE WHEN exam_answers.is_correct = 1 THEN 1 ELSE 0 END) as correct_answers')
+                    )
+                    ->groupBy('questions.topic')
+                    ->get();
+
+                foreach ($topicStats as $stat) {
+                    $topicPerformance[] = [
+                        'topic' => $stat->topic ?? 'Unknown',
+                        'total_questions' => (int)$stat->total_questions,
+                        'correct_answers' => (int)$stat->correct_answers,
+                        'percentage' => $stat->total_questions > 0
+                            ? round(($stat->correct_answers / $stat->total_questions) * 100, 2)
+                            : 0,
+                    ];
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'summary' => [
+                        'total_exams' => $totalExams,
+                        'completed_exams' => $completedCount,
+                        'in_progress_exams' => $inProgressCount,
+                        'abandoned_exams' => $abandonedCount,
+                    ],
+                    'performance' => [
+                        'average_score' => $avgScore ? round($avgScore, 2) : null,
+                        'best_score' => $bestScore ? round($bestScore, 2) : null,
+                        'worst_score' => $worstScore ? round($worstScore, 2) : null,
+                        'improvement_trend' => $improvementTrend,
+                    ],
+                    'best_exam' => $bestExam ? [
+                        'id' => $bestExam->id,
+                        'score' => round($bestExam->score ?? 0, 2),
+                        'completed_at' => $bestExam->completed_at?->toIso8601String(),
+                    ] : null,
+                    'worst_exam' => $worstExam ? [
+                        'id' => $worstExam->id,
+                        'score' => round($worstExam->score ?? 0, 2),
+                        'completed_at' => $worstExam->completed_at?->toIso8601String(),
+                    ] : null,
+                    'topic_performance' => $topicPerformance,
+                    'recent_scores' => $recentScores->map(fn($score) => round($score, 2))->toArray(),
+                    'recent_exams' => ExamHistoryResource::collection($recentExams),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch exam statistics', [
+                'user_id' => $request->user()->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch exam statistics.',
             ], 500);
         }
     }

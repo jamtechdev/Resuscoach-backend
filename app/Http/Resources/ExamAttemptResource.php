@@ -81,6 +81,36 @@ class ExamAttemptResource extends JsonResource
                 }
             ),
 
+            // Grid navigation summary (for building question grid view)
+            'grid_summary' => $this->when(
+                $this->relationLoaded('answers'),
+                function () {
+                    $sortedAnswers = $this->answers->sortBy('question_order')->values();
+
+                    return [
+                        'total_questions' => $this->total_questions,
+                        'answered_count' => $sortedAnswers->whereNotNull('selected_option')->count(),
+                        'flagged_count' => $sortedAnswers->where('is_flagged', true)->count(),
+                        'flagged_question_ids' => $sortedAnswers
+                            ->where('is_flagged', true)
+                            ->pluck('question_id')
+                            ->toArray(),
+                        'answered_question_ids' => $sortedAnswers
+                            ->whereNotNull('selected_option')
+                            ->pluck('question_id')
+                            ->toArray(),
+                        'question_status' => $sortedAnswers->map(function ($answer) {
+                            return [
+                                'question_id' => $answer->question_id,
+                                'question_order' => $answer->question_order,
+                                'is_answered' => !is_null($answer->selected_option),
+                                'is_flagged' => $answer->is_flagged,
+                            ];
+                        })->values()->toArray(),
+                    ];
+                }
+            ),
+
             // User info
             'user' => new UserResource($this->whenLoaded('user')),
         ];
