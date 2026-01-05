@@ -28,6 +28,8 @@ class ExamResultsResource extends JsonResource
             'incorrect_count' => $this->total_questions - $this->correct_count,
             'score' => round($this->score ?? 0, 2),
             'percentage' => round($this->score ?? 0, 2),
+            'passed' => $this->isPassed(),
+            'result' => $this->isPassed() ? 'passed' : 'failed',
 
             // Detailed answers with correct answers and explanations
             'answers' => ExamAnswerWithDetailsResource::collection($answers),

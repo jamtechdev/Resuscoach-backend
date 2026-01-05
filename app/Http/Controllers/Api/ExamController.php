@@ -537,10 +537,10 @@ class ExamController extends Controller
             // Order by most recent first
             $query->orderBy('started_at', 'desc');
 
-            // Pagination
+            // Pagination with eager loading
             $perPage = $request->get('per_page', 20);
             $perPage = min(max(1, (int)$perPage), 100); // Limit between 1 and 100
-            $exams = $query->paginate($perPage);
+            $exams = $query->with('answers.question')->paginate($perPage);
 
             return response()->json([
                 'success' => true,
@@ -600,8 +600,34 @@ class ExamController extends Controller
             $bestExam = $completedExams->orderBy('score', 'desc')->first();
             $worstExam = $completedExams->orderBy('score', 'asc')->first();
 
+            // Pass/Fail counts (score > 33% = passed)
+            $passedCount = (clone $completedExams)->where('score', '>', 33)->count();
+            $failedCount = $completedCount - $passedCount;
+
+            // Get all topics and subtopics from user's exams
+            $allTopics = [];
+            $allSubtopics = [];
+            $userExamsWithAnswers = ExamAttempt::where('user_id', $user->id)
+                ->with('answers.question')
+                ->get();
+
+            foreach ($userExamsWithAnswers as $exam) {
+                $topicsData = $exam->getTopicsAndSubtopics();
+                foreach ($topicsData['topics'] as $topic) {
+                    if (!in_array($topic, $allTopics)) {
+                        $allTopics[] = $topic;
+                    }
+                }
+                foreach ($topicsData['subtopics'] as $subtopic) {
+                    if (!in_array($subtopic, $allSubtopics)) {
+                        $allSubtopics[] = $subtopic;
+                    }
+                }
+            }
+
             // Recent activity (last 5 exams)
-            $recentExams = $allExams->orderBy('started_at', 'desc')
+            $recentExams = $allExams->with('answers.question')
+                ->orderBy('started_at', 'desc')
                 ->limit(5)
                 ->get();
 
@@ -656,6 +682,8 @@ class ExamController extends Controller
                         'completed_exams' => $completedCount,
                         'in_progress_exams' => $inProgressCount,
                         'abandoned_exams' => $abandonedCount,
+                        'passed_exams' => $passedCount,
+                        'failed_exams' => $failedCount,
                     ],
                     'performance' => [
                         'average_score' => $avgScore ? round($avgScore, 2) : null,
@@ -666,13 +694,19 @@ class ExamController extends Controller
                     'best_exam' => $bestExam ? [
                         'id' => $bestExam->id,
                         'score' => round($bestExam->score ?? 0, 2),
+                        'passed' => $bestExam->isPassed(),
+                        'result' => $bestExam->isPassed() ? 'passed' : 'failed',
                         'completed_at' => $bestExam->completed_at?->toIso8601String(),
                     ] : null,
                     'worst_exam' => $worstExam ? [
                         'id' => $worstExam->id,
                         'score' => round($worstExam->score ?? 0, 2),
+                        'passed' => $worstExam->isPassed(),
+                        'result' => $worstExam->isPassed() ? 'passed' : 'failed',
                         'completed_at' => $worstExam->completed_at?->toIso8601String(),
                     ] : null,
+                    'topics' => $allTopics,
+                    'subtopics' => $allSubtopics,
                     'topic_performance' => $topicPerformance,
                     'recent_scores' => $recentScores->map(fn($score) => round($score, 2))->toArray(),
                     'recent_exams' => ExamHistoryResource::collection($recentExams),

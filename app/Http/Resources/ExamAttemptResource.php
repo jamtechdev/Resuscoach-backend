@@ -56,6 +56,8 @@ class ExamAttemptResource extends JsonResource
             'score' => $showResults ? $this->score : null,
             'correct_count' => $showResults ? $this->correct_count : null,
             'percentage' => $showResults ? round($this->score ?? 0, 2) : null,
+            'passed' => $showResults && $isCompleted ? $this->isPassed() : null,
+            'result' => $showResults && $isCompleted ? ($this->isPassed() ? 'passed' : 'failed') : null,
 
             // Questions (extracted from answers, sorted by question_order) and answers
             'questions' => $this->when(

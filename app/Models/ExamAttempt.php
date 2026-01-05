@@ -144,4 +144,48 @@ class ExamAttempt extends Model
     {
         return $query->where('status', 'completed');
     }
+
+    /**
+     * Check if the exam was passed (score > 33%).
+     */
+    public function isPassed(): bool
+    {
+        if ($this->status !== 'completed' || is_null($this->score)) {
+            return false;
+        }
+        return $this->score > 33;
+    }
+
+    /**
+     * Get unique topics and subtopics from exam questions.
+     */
+    public function getTopicsAndSubtopics(): array
+    {
+        if (!$this->relationLoaded('answers')) {
+            $this->load('answers.question');
+        }
+
+        $topics = [];
+        $subtopics = [];
+
+        foreach ($this->answers as $answer) {
+            if ($answer->question) {
+                $topic = $answer->question->topic;
+                $subtopic = $answer->question->subtopic;
+
+                if ($topic && !in_array($topic, $topics)) {
+                    $topics[] = $topic;
+                }
+
+                if ($subtopic && !in_array($subtopic, $subtopics)) {
+                    $subtopics[] = $subtopic;
+                }
+            }
+        }
+
+        return [
+            'topics' => $topics,
+            'subtopics' => $subtopics,
+        ];
+    }
 }
