@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CoachingController;
 use App\Http\Controllers\Api\ExamController;
 use Illuminate\Support\Facades\Route;
 
@@ -47,6 +48,18 @@ Route::prefix('v1')->group(function () {
             Route::post('/{id}/flag', [ExamController::class, 'flagQuestion'])->name('flag');
             Route::post('/{id}/submit', [ExamController::class, 'submit'])->name('submit');
             Route::get('/{id}/results', [ExamController::class, 'results'])->name('results');
+        });
+
+        // Protected coaching routes
+        Route::prefix('coaching')->name('api.coaching.')->group(function () {
+            Route::post('/start/{examId}', [CoachingController::class, 'start'])->name('start');
+            Route::get('/{sessionId}', [CoachingController::class, 'show'])->name('show');
+            Route::get('/{sessionId}/question/{questionId}/step', [CoachingController::class, 'getCurrentStep'])->name('get-current-step');
+            Route::post('/{sessionId}/respond', [CoachingController::class, 'respond'])->name('respond');
+            Route::post('/{sessionId}/pause', [CoachingController::class, 'pause'])->name('pause');
+            Route::post('/{sessionId}/resume', [CoachingController::class, 'resume'])->name('resume');
+            Route::post('/{sessionId}/complete', [CoachingController::class, 'complete'])->name('complete');
+            Route::get('/{sessionId}/summary', [CoachingController::class, 'getSummary'])->name('summary');
         });
     });
 });
