@@ -103,6 +103,7 @@ class CoachingController extends Controller
                     'started_at' => now(),
                     'status' => 'in_progress',
                     'questions_reviewed' => count($questionIds),
+                    'current_question_id' => !empty($questionIds) ? $questionIds[0] : null, // Set first question as current
                 ]);
 
                 DB::commit();
@@ -198,6 +199,7 @@ class CoachingController extends Controller
                     'total_duration_seconds' => $session->total_duration_seconds,
                     'questions_reviewed' => $session->questions_reviewed,
                     'questions_to_review' => $questionIds,
+                    'current_question_id' => $session->current_question_id,
                     'has_summary' => $session->summary !== null,
                 ],
             ]);
@@ -216,6 +218,124 @@ class CoachingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch coaching session.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all questions for Step 1 (initial load).
+     * Returns all questions with their data so frontend can save them locally.
+     */
+    public function getAllQuestions(Request $request, int $sessionId): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            $session = CoachingSession::where('id', $sessionId)
+                ->where('user_id', $user->id)
+                ->firstOrFail();
+
+            if ($session->status !== 'in_progress') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Coaching session is not in progress.',
+                ], 403);
+            }
+
+            $examAttempt = $session->attempt;
+
+            // Get questions being reviewed in this session
+            $incorrectAnswers = ExamAnswer::where('attempt_id', $examAttempt->id)
+                ->where('is_correct', false)
+                ->with('question')
+                ->get();
+
+            $flaggedAnswers = ExamAnswer::where('attempt_id', $examAttempt->id)
+                ->where('is_flagged', true)
+                ->with('question')
+                ->get();
+
+            $questionIds = $incorrectAnswers->pluck('question_id')->toArray();
+            $flaggedQuestionIds = $flaggedAnswers->pluck('question_id')->toArray();
+
+            foreach ($flaggedQuestionIds as $flaggedId) {
+                if (!in_array($flaggedId, $questionIds)) {
+                    $questionIds[] = $flaggedId;
+                }
+            }
+            $questionIds = array_slice($questionIds, 0, 10);
+
+            // Get all questions with their answers
+            $allQuestions = [];
+            foreach ($questionIds as $qId) {
+                $question = Question::find($qId);
+                $examAnswer = ExamAnswer::where('attempt_id', $examAttempt->id)
+                    ->where('question_id', $qId)
+                    ->first();
+
+                if ($question && $examAnswer) {
+                    // Create Step 1 dialogue record if not exists
+                    $existingDialogue = CoachingDialogue::where('session_id', $sessionId)
+                        ->where('question_id', $qId)
+                        ->where('step_number', 1)
+                        ->first();
+
+                    if (!$existingDialogue) {
+                        CoachingDialogue::create([
+                            'session_id' => $sessionId,
+                            'question_id' => $qId,
+                            'step_number' => 1,
+                            'ai_prompt' => null,
+                            'interaction_order' => 1,
+                        ]);
+                    }
+
+                    $allQuestions[] = [
+                        'question_id' => $question->id,
+                        'question' => [
+                            'id' => $question->id,
+                            'stem' => $question->stem,
+                            'scenario' => $question->scenario,
+                            'options' => [
+                                'A' => $question->option_a,
+                                'B' => $question->option_b,
+                                'C' => $question->option_c,
+                                'D' => $question->option_d,
+                                'E' => $question->option_e,
+                            ],
+                        ],
+                        'user_answer' => $examAnswer->selected_option,
+                        'is_flagged' => $examAnswer->is_flagged,
+                        'is_correct' => $examAnswer->is_correct,
+                        'step_number' => 1,
+                    ];
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'session_id' => $sessionId,
+                    'questions' => $allQuestions,
+                    'total_questions' => count($allQuestions),
+                    'message' => 'All questions loaded. Frontend can now manage navigation and timer.',
+                ],
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Coaching session not found.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Failed to get all questions', [
+                'session_id' => $sessionId,
+                'user_id' => $request->user()->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to load questions.',
             ], 500);
         }
     }
@@ -324,6 +444,8 @@ class CoachingController extends Controller
                             ],
                         ],
                         'user_answer' => $examAnswer->selected_option,
+                        'is_flagged' => $examAnswer->is_flagged,
+                        'is_correct' => $examAnswer->is_correct,
                         'ai_prompt' => null,
                         'message' => 'Review the question and your answer. Click next to continue.',
                     ],
@@ -627,6 +749,11 @@ class CoachingController extends Controller
                 ], 403);
             }
 
+            // Update current question if provided
+            if ($request->has('current_question_id')) {
+                $session->current_question_id = $request->current_question_id;
+            }
+
             $session->pause();
 
             return response()->json([
@@ -636,6 +763,7 @@ class CoachingController extends Controller
                     'session_id' => $session->id,
                     'status' => $session->status,
                     'paused_at' => $session->paused_at->toIso8601String(),
+                    'current_question_id' => $session->current_question_id,
                 ],
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -653,6 +781,65 @@ class CoachingController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to pause session. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Update current question (when user navigates between questions).
+     */
+    public function updateCurrentQuestion(Request $request, int $sessionId): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            $session = CoachingSession::where('id', $sessionId)
+                ->where('user_id', $user->id)
+                ->firstOrFail();
+
+            if ($session->status !== 'in_progress') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Can only update current question for in-progress sessions.',
+                ], 403);
+            }
+
+            $request->validate([
+                'question_id' => 'required|integer|exists:questions,id',
+            ]);
+
+            $session->current_question_id = $request->question_id;
+            $session->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Current question updated.',
+                'data' => [
+                    'session_id' => $session->id,
+                    'current_question_id' => $session->current_question_id,
+                ],
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Coaching session not found.',
+            ], 404);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Failed to update current question', [
+                'session_id' => $sessionId,
+                'user_id' => $request->user()->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update current question.',
             ], 500);
         }
     }
@@ -685,6 +872,7 @@ class CoachingController extends Controller
                     'session_id' => $session->id,
                     'status' => $session->status,
                     'paused_at' => $session->paused_at,
+                    'current_question_id' => $session->current_question_id,
                 ],
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {

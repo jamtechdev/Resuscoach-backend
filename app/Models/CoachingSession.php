@@ -20,6 +20,7 @@ class CoachingSession extends Model
         'paused_at',
         'total_duration_seconds',
         'questions_reviewed',
+        'current_question_id',
         'status',
     ];
 
