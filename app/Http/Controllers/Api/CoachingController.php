@@ -623,7 +623,9 @@ class CoachingController extends Controller
                     'data' => [
                         'step_number' => 5,
                         'ai_prompt' => $followUp,
-                        'waiting_for_response' => true,
+                        'waiting_for_response' => false, // Step 5 is optional - user can skip or answer
+                        'is_optional' => true, // Indicates this step is optional
+                        'message' => 'These are optional follow-up questions. You can answer them or proceed to the next question.',
                     ],
                 ]);
             }
