@@ -580,9 +580,9 @@ class CoachingController extends Controller
                 ]);
             }
 
-            // Step 5: Follow-up questions (optional, time permitting)
+            // Step 5: Show AI feedback from step 4 and completion message
             if ($currentStep === 5) {
-                // Ensure step 4 is completed (user has responded and received feedback)
+                // Ensure step 4 is completed (user has responded and feedback is generated)
                 $step4Dialogue = $dialogues->where('step_number', 4)->first();
                 if (!$step4Dialogue || !$step4Dialogue->user_response || !$step4Dialogue->ai_feedback) {
                     return response()->json([
@@ -594,26 +594,18 @@ class CoachingController extends Controller
                     ], 400);
                 }
 
+                // Get AI feedback from step 4
+                $aiFeedback = $step4Dialogue->ai_feedback;
+
+                // Create step 5 dialogue record if not exists
                 $existingDialogue = $dialogues->where('step_number', 5)->first();
-
-                if ($existingDialogue && $existingDialogue->ai_prompt) {
-                    $followUp = $existingDialogue->ai_prompt;
-                } else {
-                    // Get previous interactions for context
-                    $previousInteractions = $dialogues->map(function ($d) {
-                        return ($d->ai_prompt ?? '') . ' ' . ($d->user_response ?? '') . ' ' . ($d->ai_feedback ?? '');
-                    })->toArray();
-
-                    // Generate follow-up
-                    $followUp = $this->coachingService->generateStep5FollowUp($question, $previousInteractions);
-
-                    // Save the dialogue
+                if (!$existingDialogue) {
                     $interactionOrder = $dialogues->max('interaction_order') ?? 0;
                     CoachingDialogue::create([
                         'session_id' => $sessionId,
                         'question_id' => $questionId,
                         'step_number' => 5,
-                        'ai_prompt' => $followUp,
+                        'ai_feedback' => $aiFeedback, // Store the feedback reference
                         'interaction_order' => $interactionOrder + 1,
                     ]);
                 }
@@ -622,10 +614,9 @@ class CoachingController extends Controller
                     'success' => true,
                     'data' => [
                         'step_number' => 5,
-                        'ai_prompt' => $followUp,
-                        'waiting_for_response' => false, // Step 5 is optional - user can skip or answer
-                        'is_optional' => true, // Indicates this step is optional
-                        'message' => 'These are optional follow-up questions. You can answer them or proceed to the next question.',
+                        'ai_feedback' => $aiFeedback,
+                        'is_question_complete' => true,
+                        'message' => 'Great job! You have completed this question. Please proceed to the next question.',
                     ],
                 ]);
             }
@@ -689,9 +680,9 @@ class CoachingController extends Controller
             ]);
 
             // Generate AI feedback based on step
-            $aiFeedback = null;
+            // Step 4: Generate feedback but don't return it yet (will be shown in step 5)
             if ($request->step_number === 4) {
-                // Step 4: Validate user's explanation
+                // Step 4: Validate user's explanation and save feedback
                 $aiFeedback = $this->coachingService->generateStep4Feedback(
                     $question,
                     $request->response
@@ -709,7 +700,6 @@ class CoachingController extends Controller
                 'data' => [
                     'step_number' => $request->step_number,
                     'user_response' => $request->response,
-                    'ai_feedback' => $aiFeedback,
                     'next_step' => $request->step_number === 2 ? 3 : ($request->step_number === 4 ? 5 : null),
                 ],
             ]);
