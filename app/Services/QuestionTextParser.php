@@ -312,7 +312,7 @@ class QuestionTextParser
         }
 
         $scenario = implode("\n", $scenarioLines);
-        $scenario = preg_replace('/[ \t]+/', ' ', $scenario); // Normalize spaces
+        $scenario = preg_replace('/[ \t]+/', ' ', $scenario) ; // Normalize spaces
         $scenario = preg_replace('/\n{3,}/', "\n\n", $scenario); // Max 2 line breaks
         $scenario = trim($scenario);
 

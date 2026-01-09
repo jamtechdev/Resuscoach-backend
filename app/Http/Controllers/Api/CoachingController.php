@@ -329,7 +329,7 @@ class CoachingController extends Controller
         } catch (\Exception $e) {
             Log::error('Failed to get all questions', [
                 'session_id' => $sessionId,
-                'user_id' => $request->user()->id,
+                'user_id' => $request->user()->id, 
                 'error' => $e->getMessage(),
             ]);
 
