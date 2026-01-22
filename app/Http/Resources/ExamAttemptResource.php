@@ -83,7 +83,7 @@ class ExamAttemptResource extends JsonResource
                 }
             ),
 
-            // Grid navigation summary (for building question grid view)
+             // Grid navigation summary (for building question grid view)
             'grid_summary' => $this->when(
                 $this->relationLoaded('answers'),
                 function () {

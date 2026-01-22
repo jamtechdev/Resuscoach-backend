@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CoachingController;
 use App\Http\Controllers\Api\ExamController;
+use App\Http\Controllers\Api\RevisionController;
 use Illuminate\Support\Facades\Route;
 
 // API v1 routes
@@ -62,6 +63,18 @@ Route::prefix('v1')->group(function () {
             Route::post('/{sessionId}/resume', [CoachingController::class, 'resume'])->name('resume');
             Route::post('/{sessionId}/complete', [CoachingController::class, 'complete'])->name('complete');
             Route::get('/{sessionId}/summary', [CoachingController::class, 'getSummary'])->name('summary');
+        });
+
+        // Protected revision routes
+        Route::prefix('revision')->name('api.revision.')->group(function () {
+            Route::post('/start', [RevisionController::class, 'start'])->name('start');
+            Route::get('/{sessionId}', [RevisionController::class, 'show'])->name('show');
+            Route::get('/{sessionId}/question', [RevisionController::class, 'getCurrentQuestion'])->name('get-current-question');
+            Route::post('/{sessionId}/answer', [RevisionController::class, 'submitAnswer'])->name('submit-answer');
+            Route::post('/{sessionId}/next', [RevisionController::class, 'getNextQuestion'])->name('get-next-question');
+            Route::post('/{sessionId}/complete', [RevisionController::class, 'complete'])->name('complete');
+            Route::post('/{sessionId}/pause', [RevisionController::class, 'pause'])->name('pause');
+            Route::post('/{sessionId}/resume', [RevisionController::class, 'resume'])->name('resume');
         });
     });
 });
