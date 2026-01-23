@@ -44,7 +44,7 @@ class QuestionImport implements ToModel, WithHeadingRow, WithValidation, SkipsEm
                 $refData = $row['references'];
                 // Try to decode as JSON first
                 $decoded = json_decode($refData, true);
-                if (json_last_error() === JSON_ERROR_NONE && is_array($decode   d)) {
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                     $references = $decoded;
                 } else {
                     // If not JSON, try pipe-separated format: "Title1|URL1||Title2|URL2"

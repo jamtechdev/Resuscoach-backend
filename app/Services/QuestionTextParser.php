@@ -312,7 +312,7 @@ class QuestionTextParser
         }
 
         $scenario = implode("\n", $scenarioLines);
-        $scenario = preg_replace('/[ \t]+/', ' ', $scenario) ; // Normalize spaces
+        $scenario = preg_replace('/[ \t]+/', ' ', $scenario); // Normalize spaces
         $scenario = preg_replace('/\n{3,}/', "\n\n", $scenario); // Max 2 line breaks
         $scenario = trim($scenario);
 
@@ -389,9 +389,18 @@ class QuestionTextParser
                 // Options are typically short (under 200 chars) - if longer, truncate at explanation markers
                 if (strlen($optionText) > 200) {
                     // Look for common explanation starters within the text
-                    $explanationMarkers = ['The patient', 'This patient', 'The most', 'The combination',
-                                           'This is', 'The diagnosis', 'The clinical', 'The key',
-                                           'This case', 'This scenario'];
+                    $explanationMarkers = [
+                        'The patient',
+                        'This patient',
+                        'The most',
+                        'The combination',
+                        'This is',
+                        'The diagnosis',
+                        'The clinical',
+                        'The key',
+                        'This case',
+                        'This scenario'
+                    ];
                     foreach ($explanationMarkers as $marker) {
                         $pos = stripos($optionText, $marker);
                         if ($pos !== false && $pos > 5) {
