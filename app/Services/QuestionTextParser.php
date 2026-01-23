@@ -377,13 +377,29 @@ class QuestionTextParser
 
         // Pattern: A. text (most common format)
         // Match from start of line, continue until next option or explanation starts
-        if (preg_match_all('/^\s*([A-E])\.\s+([^\n]+(?:\n(?!^\s*[A-E]\.|Rationale|Explanation|The\s+most|Correct|Answer|Why|Differentiating|References)[^\n]+)*)/m', $block, $matches, PREG_SET_ORDER)) {
+        // Stop at common explanation starters: "The patient", "This patient", "The most", "Rationale", etc.
+        if (preg_match_all('/^\s*([A-E])\.\s+([^\n]+(?:\n(?!^\s*[A-E]\.|Rationale|Explanation|The\s+most|The\s+patient|This\s+patient|The\s+combination|This\s+is|Correct|Answer|Why|Differentiating|References|The\s+diagnosis|The\s+clinical|The\s+key|This\s+case|This\s+scenario)[^\n]+)*)/m', $block, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $match) {
                 $optionText = trim($match[2]);
                 // Remove trailing period if it's just punctuation
                 $optionText = preg_replace('/\.$/', '', $optionText);
                 // Clean up whitespace
                 $optionText = preg_replace('/\s+/', ' ', $optionText);
+                // Remove any explanation text that might have been captured after the option
+                // Options are typically short (under 200 chars) - if longer, truncate at explanation markers
+                if (strlen($optionText) > 200) {
+                    // Look for common explanation starters within the text
+                    $explanationMarkers = ['The patient', 'This patient', 'The most', 'The combination',
+                                           'This is', 'The diagnosis', 'The clinical', 'The key',
+                                           'This case', 'This scenario'];
+                    foreach ($explanationMarkers as $marker) {
+                        $pos = stripos($optionText, $marker);
+                        if ($pos !== false && $pos > 5) {
+                            $optionText = trim(substr($optionText, 0, $pos));
+                            break;
+                        }
+                    }
+                }
                 if (!empty($optionText) && strlen($optionText) > 3) {
                     $options[$match[1]] = $optionText;
                 }
