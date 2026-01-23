@@ -100,6 +100,12 @@ class ListQuestions extends ListRecords
                         $import = new QuestionImport();
                         Excel::import($import, $filePath);
 
+                        // Get import statistics
+                        $stats = $import->getStats();
+                        $imported = $stats['imported'];
+                        $skipped = $stats['skipped'];
+                        $errors = $stats['errors'];
+
                         // Clean up uploaded file
                         if (Storage::disk('local')->exists($storedPath)) {
                             Storage::disk('local')->delete($storedPath);
@@ -110,11 +116,36 @@ class ListQuestions extends ListRecords
                             @unlink($tempFile);
                         }
 
-                        \Filament\Notifications\Notification::make()
-                            ->title('Import Successful')
-                            ->success()
-                            ->body('Questions have been imported successfully.')
-                            ->send();
+                        // Build success message with statistics
+                        $message = "Import completed!\n";
+                        $message .= "Imported: {$imported} questions\n";
+                        if ($skipped > 0) {
+                            $message .= "Skipped (duplicates): {$skipped} questions\n";
+                        }
+                        if ($errors > 0) {
+                            $message .= "Errors: {$errors} rows\n";
+                            if (!empty($stats['error_messages'])) {
+                                $message .= "\nFirst few errors:\n";
+                                $message .= implode("\n", array_slice($stats['error_messages'], 0, 5));
+                                if (count($stats['error_messages']) > 5) {
+                                    $message .= "\n... and " . (count($stats['error_messages']) - 5) . " more errors";
+                                }
+                            }
+                        }
+
+                        if ($imported > 0) {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Import Successful')
+                                ->success()
+                                ->body($message)
+                                ->send();
+                        } else {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Import Completed - No Questions Imported')
+                                ->warning()
+                                ->body($message)
+                                ->send();
+                        }
                     } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
                         $failures = $e->failures();
                         $message = 'Validation errors occurred: ';
@@ -222,36 +253,27 @@ class ListQuestions extends ListRecords
 
                         // Import questions
                         $imported = 0;
+                        $updated = 0;
                         $skipped = 0;
                         $errors = [];
 
                         foreach ($questions as $index => $questionData) {
                             try {
-                                // Check if question already exists (use a more flexible match)
-                                // First try exact stem match
+                                // Check if question already exists (exact stem match only)
                                 $existingQuestion = Question::where('stem', $questionData['stem'])->first();
 
-                                // If not found, try a partial match (first 100 chars) to catch similar questions
-                                if (!$existingQuestion && strlen($questionData['stem']) > 50) {
-                                    $stemStart = substr($questionData['stem'], 0, 100);
-                                    $existingQuestion = Question::where('stem', 'like', $stemStart . '%')->first();
-                                }
-
                                 if ($existingQuestion) {
-                                    // Update the topic if it's different (in case it was imported with wrong topic)
-                                    if ($existingQuestion->topic !== $questionData['topic']) {
-                                        $existingQuestion->update(['topic' => $questionData['topic']]);
-                                        $imported++; // Count as imported since we updated it
-                                    } else {
-                                        $skipped++;
-                                    }
+                                    // Update existing question with new data (in case fields changed)
+                                    $existingQuestion->update($questionData);
+                                    $updated++; // Count as updated (duplicate)
                                     continue;
                                 }
 
+                                // Create new question
                                 Question::create($questionData);
-                                $imported++;
+                                $imported++; // Count as new import
                             } catch (\Exception $e) {
-                                $errors[] = "Question " . ($index + 1) . ": " . $e->getMessage() . " (Stem: " . substr($questionData['stem'], 0, 50) . "...)";
+                                $errors[] = "Question " . ($index + 1) . ": " . $e->getMessage() . " (Stem: " . substr($questionData['stem'] ?? '', 0, 50) . "...)";
                                 $skipped++;
                             }
                         }
@@ -259,20 +281,40 @@ class ListQuestions extends ListRecords
                         // Clean up uploaded file
                         Storage::disk('local')->delete($filePath);
 
-                        $message = "Import completed!\n";
-                        $message .= "Detected Topic: {$detectedTopic}\n";
-                        $message .= "Parsed from file: {$totalParsed}\n";
-                        $message .= "Imported/Updated: {$imported}, Skipped: {$skipped}";
+                        $message = "Import completed!\n\n";
+                        $message .= "📊 Summary:\n";
+                        $message .= "• Parsed from file: {$totalParsed} questions\n";
+                        $message .= "• Detected Topic: {$detectedTopic}\n\n";
+
+                        if ($imported > 0) {
+                            $message .= "✅ New questions imported: {$imported}\n";
+                        }
+
+                        if ($updated > 0) {
+                            $message .= "🔄 Duplicate questions updated: {$updated}\n";
+                            $message .= "   (These questions already existed in the database and were updated with new data)\n";
+                        }
+
+                        if ($skipped > 0) {
+                            $message .= "❌ Questions with errors: {$skipped}\n";
+                        }
+
+                        if ($imported === 0 && $updated === 0 && $skipped === 0) {
+                            $message .= "⚠️ No questions were processed. Please check the file format.\n";
+                        }
+
                         if (!empty($errors)) {
-                            $message .= "\n\nErrors: " . implode("\n", array_slice($errors, 0, 5));
-                            if (count($errors) > 5) {
-                                $message .= "\n... and " . (count($errors) - 5) . " more errors";
+                            $message .= "\n\n❌ Error Details:\n";
+                            $message .= implode("\n", array_slice($errors, 0, 10));
+                            if (count($errors) > 10) {
+                                $message .= "\n... and " . (count($errors) - 10) . " more errors";
                             }
                         }
 
-                        // Warn if parsed count doesn't match imported+skipped
-                        if ($totalParsed > 0 && ($imported + $skipped) < $totalParsed) {
-                            $message .= "\n\n⚠️ Warning: " . ($totalParsed - $imported - $skipped) . " questions were parsed but not processed (check errors above)";
+                        // Warn if parsed count doesn't match processed
+                        $totalProcessed = $imported + $updated + $skipped;
+                        if ($totalParsed > 0 && $totalProcessed < $totalParsed) {
+                            $message .= "\n\n⚠️ Warning: " . ($totalParsed - $totalProcessed) . " questions were parsed but not processed (check errors above)";
                         }
 
                         \Filament\Notifications\Notification::make()
