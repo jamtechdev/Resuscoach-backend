@@ -146,6 +146,9 @@ class ListQuestions extends ListRecords
                                 ->body($message)
                                 ->send();
                         }
+
+                        // Refresh the page to update counts
+                        $this->redirect(static::getResource()::getUrl('index'));
                     } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
                         $failures = $e->failures();
                         $message = 'Validation errors occurred: ';
@@ -322,6 +325,9 @@ class ListQuestions extends ListRecords
                             ->success()
                             ->body($message)
                             ->send();
+
+                        // Refresh the page to update counts
+                        $this->redirect(static::getResource()::getUrl('index'));
                     } catch (\Exception $e) {
                         \Filament\Notifications\Notification::make()
                             ->title('Import Failed')
