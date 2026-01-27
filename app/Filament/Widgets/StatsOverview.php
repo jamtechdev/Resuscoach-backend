@@ -14,7 +14,7 @@ class StatsOverview extends BaseWidget
     protected static ?int $sort = 1;
 
     // Auto-refresh widget every 10 seconds
-    protected static ?string $pollingInterval = '10s';
+    protected ?string $pollingInterval = '10s';
 
     protected function getStats(): array
     {
