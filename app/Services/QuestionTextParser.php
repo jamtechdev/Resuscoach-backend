@@ -4,26 +4,33 @@ namespace App\Services;
 
 class QuestionTextParser
 {
+    // Dynamic patterns detected from file
+    protected ?string $cpPattern = null;
+    protected ?string $ccPattern = null;
+
     public function parse(string $content, ?string $filename = null): array
     {
         $questions = [];
 
-        // Detect topic from filename or content
+        // Normalize line endings first
+        $content = str_replace(["\r\n", "\r"], "\n", $content);
+
+        // Detect topic dynamically from content or filename
         $detectedTopic = $this->detectTopic($content, $filename);
 
-        // Extract CP and CC mappings first
+        // Detect CP/CC patterns dynamically from the content
+        $this->detectPatterns($content);
+
+        // Extract CP and CC mappings using detected patterns
         $cpMap = $this->extractCPCodes($content);
         $ccMap = $this->extractCCCodes($content);
 
-        // Normalize line endings
-        $content = str_replace(["\r\n", "\r"], "\n", $content);
-
         // Split content into sections - look for question patterns
-        // Questions typically start with "A XX-year-old" or "What is" or numbered
         $lines = explode("\n", $content);
 
         $currentCP = null;
         $currentCC = null;
+        $currentSubtopic = null;
         $currentBlock = [];
         $questionNumber = 1;
 
@@ -35,12 +42,13 @@ class QuestionTextParser
                 continue;
             }
 
-            // Update CP/CC context
-            if (preg_match('/^CP(\d+)\.\s*(.+)$/', $trimmedLine, $cpMatch)) {
-                $currentCP = 'CP' . $cpMatch[1] . '. ' . trim($cpMatch[2]);
+            // Update CP context using dynamic pattern (e.g., OptP1, CP1, NeuroP1, etc.)
+            if ($this->cpPattern && preg_match('/^(' . preg_quote($this->cpPattern, '/') . ')(\d+)\.\s*(.+)$/i', $trimmedLine, $cpMatch)) {
+                $currentCP = $cpMatch[1] . $cpMatch[2] . '. ' . trim($cpMatch[3]);
+                $currentSubtopic = trim($cpMatch[3]); // Extract subtopic from CP line
                 // If we have a block, process it before starting new CP
                 if (!empty($currentBlock)) {
-                    $question = $this->processBlock(implode("\n", $currentBlock), $currentCP, $currentCC, $questionNumber, $detectedTopic);
+                    $question = $this->processBlock(implode("\n", $currentBlock), $currentCP, $currentCC, $questionNumber, $detectedTopic, $currentSubtopic);
                     if ($question) {
                         $questions[] = $question;
                         $questionNumber++;
@@ -50,11 +58,13 @@ class QuestionTextParser
                 continue;
             }
 
-            if (preg_match('/^CC(\d+)\.\s*(.+)$/', $trimmedLine, $ccMatch)) {
-                $currentCC = 'CC' . $ccMatch[1] . '. ' . trim($ccMatch[2]);
+            // Update CC context using dynamic pattern (e.g., OptC1, CC1, NeuroC1, etc.)
+            if ($this->ccPattern && preg_match('/^(' . preg_quote($this->ccPattern, '/') . ')(\d+)\.\s*(.+)$/i', $trimmedLine, $ccMatch)) {
+                $currentCC = $ccMatch[1] . $ccMatch[2] . '. ' . trim($ccMatch[3]);
+                $currentSubtopic = trim($ccMatch[3]); // Extract subtopic from CC line
                 // If we have a block, process it before starting new CC
                 if (!empty($currentBlock)) {
-                    $question = $this->processBlock(implode("\n", $currentBlock), $currentCP, $currentCC, $questionNumber, $detectedTopic);
+                    $question = $this->processBlock(implode("\n", $currentBlock), $currentCP, $currentCC, $questionNumber, $detectedTopic, $currentSubtopic);
                     if ($question) {
                         $questions[] = $question;
                         $questionNumber++;
@@ -64,13 +74,8 @@ class QuestionTextParser
                 continue;
             }
 
-            // Detect start of new question block (only for numbered questions or clear separators)
-            // Don't treat question words like "What is" as new question starts - they're part of the scenario
+            // Detect start of new question block
             $isQuestionStart = false;
-            // Only treat as new question if:
-            // - Numbered question (1. or Question 1:)
-            // - Clinical scenario starter (A XX-year-old, You are)
-            // - But NOT just question words (What is, Which, etc.) - those are part of the question text
             if (preg_match('/^(A \d+[-–](year|month|week|day)|You are|^\d+\.\s+[A-Z]|^Question\s+\d+[:\s])/i', $trimmedLine)) {
                 $isQuestionStart = true;
             }
@@ -80,7 +85,7 @@ class QuestionTextParser
                 $blockText = implode("\n", $currentBlock);
                 // Check if previous block has options (is a complete question)
                 if (preg_match('/^\s*[A-E]\.\s+/m', $blockText)) {
-                    $question = $this->processBlock($blockText, $currentCP, $currentCC, $questionNumber, $detectedTopic);
+                    $question = $this->processBlock($blockText, $currentCP, $currentCC, $questionNumber, $detectedTopic, $currentSubtopic);
                     if ($question) {
                         $questions[] = $question;
                         $questionNumber++;
@@ -88,7 +93,6 @@ class QuestionTextParser
                 }
                 $currentBlock = [$line];
             } else {
-                // Always add to current block - question words are part of the question text, not separators
                 $currentBlock[] = $line;
             }
         }
@@ -97,7 +101,7 @@ class QuestionTextParser
         if (!empty($currentBlock)) {
             $blockText = implode("\n", $currentBlock);
             if (preg_match('/^\s*[A-E]\.\s+/m', $blockText)) {
-                $question = $this->processBlock($blockText, $currentCP, $currentCC, $questionNumber, $detectedTopic);
+                $question = $this->processBlock($blockText, $currentCP, $currentCC, $questionNumber, $detectedTopic, $currentSubtopic);
                 if ($question) {
                     $questions[] = $question;
                 }
@@ -107,63 +111,133 @@ class QuestionTextParser
         return $questions;
     }
 
-    private function processBlock(string $block, ?string $cp, ?string $cc, int $number, string $topic = 'Cardiology'): ?array
+    private function processBlock(string $block, ?string $cp, ?string $cc, int $number, string $topic, ?string $subtopic = null): ?array
     {
-        return $this->extractQuestion($block, $cp, $cc, $number, $topic);
+        return $this->extractQuestion($block, $cp, $cc, $number, $topic, $subtopic);
     }
 
+    /**
+     * Detect topic dynamically from file content or filename.
+     * No hardcoded list - extracts the first capitalized word/phrase that looks like a topic.
+     */
     private function detectTopic(string $content, ?string $filename = null): string
     {
-        // Try to detect from filename first
+        // Try to detect from the first few lines of content
+        // Look for a standalone topic name at the start (single word or phrase on its own line)
+        $lines = explode("\n", $content);
+        
+        foreach (array_slice($lines, 0, 10) as $line) {
+            $trimmedLine = trim($line);
+            
+            // Skip empty lines
+            if (empty($trimmedLine)) {
+                continue;
+            }
+            
+            // Look for a line that is just a topic name (capitalized word/phrase, not a question or CP/CC)
+            // Must be a single word or short phrase (not a sentence), starts with capital letter
+            if (preg_match('/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)$/', $trimmedLine, $match)) {
+                // This looks like a topic header (e.g., "Ophthalmology", "Emergency Medicine", "Cardiology")
+                return trim($match[1]);
+            }
+            
+            // Also check for topic names followed by section markers
+            if (preg_match('/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:–-]?\s*$/i', $trimmedLine, $match)) {
+                return trim($match[1]);
+            }
+        }
+        
+        // Try to extract from filename if available
         if ($filename) {
-            $filename = strtolower($filename);
-            if (strpos($filename, 'cardiology') !== false) {
-                return 'Cardiology';
-            }
-            if (strpos($filename, 'procedural') !== false) {
-                return 'Procedural';
-            }
-            if (strpos($filename, 'respiratory') !== false) {
-                return 'Respiratory';
-            }
-            if (strpos($filename, 'trauma') !== false) {
-                return 'Trauma';
-            }
-            if (strpos($filename, 'neurology') !== false) {
-                return 'Neurology';
+            // Remove extension and clean up
+            $name = pathinfo($filename, PATHINFO_FILENAME);
+            // Convert underscores/hyphens to spaces, capitalize
+            $name = str_replace(['_', '-'], ' ', $name);
+            $name = ucwords(strtolower($name));
+            // If it looks like a reasonable topic name, use it
+            if (preg_match('/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*$/', $name)) {
+                return $name;
             }
         }
-
-        // Try to detect from content (look for topic headers)
-        if (preg_match('/^(Cardiology|Procedural|Respiratory|Trauma|Neurology|Paediatrics|Toxicology)/mi', $content, $match)) {
-            return ucfirst(strtolower(trim($match[1])));
+        
+        // If we still can't detect, try to find common medical specialty keywords anywhere in first 20 lines
+        $firstPart = implode("\n", array_slice($lines, 0, 20));
+        if (preg_match('/\b(Ophthalmology|Cardiology|Neurology|Respiratory|Trauma|Paediatrics|Pediatrics|Toxicology|Gastroenterology|Nephrology|Endocrinology|Dermatology|Rheumatology|Haematology|Hematology|Oncology|Psychiatry|Geriatrics|Obstetrics|Gynaecology|Gynecology|Urology|Orthopaedics|Orthopedics|Emergency Medicine|Critical Care|Infectious Disease|Immunology|Allergy)\b/i', $firstPart, $match)) {
+            return ucfirst(strtolower($match[1]));
         }
-
-        // Default to Cardiology if not detected
-        return 'Cardiology';
+        
+        // Default fallback - use "General" instead of hardcoded topic
+        return 'General';
     }
 
+    /**
+     * Detect CP and CC patterns dynamically from the content.
+     * Looks for patterns like "OptP1.", "CP1.", "NeuroP1.", etc.
+     */
+    private function detectPatterns(string $content): void
+    {
+        // Reset patterns
+        $this->cpPattern = null;
+        $this->ccPattern = null;
+        
+        // Look for Clinical Presentation patterns (ends with P followed by number)
+        // Examples: OptP1, CP1, CardP1, NeuroP1, etc.
+        if (preg_match('/^([A-Za-z]+P)\d+\.\s+/m', $content, $match)) {
+            $this->cpPattern = $match[1];
+        }
+        
+        // Look for Condition Code patterns (ends with C followed by number)
+        // Examples: OptC1, CC1, CardC1, NeuroC1, etc.
+        if (preg_match('/^([A-Za-z]+C)\d+\.\s+/m', $content, $match)) {
+            $this->ccPattern = $match[1];
+        }
+        
+        // Fallback to standard CP/CC if no specific pattern found but content has them
+        if (!$this->cpPattern && preg_match('/^CP\d+\.\s+/m', $content)) {
+            $this->cpPattern = 'CP';
+        }
+        if (!$this->ccPattern && preg_match('/^CC\d+\.\s+/m', $content)) {
+            $this->ccPattern = 'CC';
+        }
+    }
+
+    /**
+     * Extract CP codes dynamically using detected pattern.
+     */
     private function extractCPCodes(string $content): array
     {
         $cpMap = [];
-        preg_match_all('/CP(\d+)\.\s*([^\n]+)/', $content, $matches, PREG_SET_ORDER);
-        foreach ($matches as $match) {
-            $cpMap[$match[1]] = trim($match[2]);
+        
+        if ($this->cpPattern) {
+            $pattern = '/^' . preg_quote($this->cpPattern, '/') . '(\d+)\.\s*([^\n]+)/m';
+            preg_match_all($pattern, $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $match) {
+                $cpMap[$match[1]] = trim($match[2]);
+            }
         }
+        
         return $cpMap;
     }
 
+    /**
+     * Extract CC codes dynamically using detected pattern.
+     */
     private function extractCCCodes(string $content): array
     {
         $ccMap = [];
-        preg_match_all('/CC(\d+)\.\s*([^\n]+)/', $content, $matches, PREG_SET_ORDER);
-        foreach ($matches as $match) {
-            $ccMap[$match[1]] = trim($match[2]);
+        
+        if ($this->ccPattern) {
+            $pattern = '/^' . preg_quote($this->ccPattern, '/') . '(\d+)\.\s*([^\n]+)/m';
+            preg_match_all($pattern, $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $match) {
+                $ccMap[$match[1]] = trim($match[2]);
+            }
         }
+        
         return $ccMap;
     }
 
-    private function extractQuestion(string $block, ?string $cp, ?string $cc, int $number, string $topic = 'Cardiology'): ?array
+    private function extractQuestion(string $block, ?string $cp, ?string $cc, int $number, string $topic, ?string $subtopic = null): ?array
     {
         // Extract scenario and stem (question text)
         $scenarioAndStem = $this->extractStem($block);
@@ -205,6 +279,9 @@ class QuestionTextParser
         // Extract guideline info
         $guidelineInfo = $this->extractGuidelineInfo($block);
 
+        // Use dynamically extracted subtopic, or try to extract from CP/CC if not provided
+        $finalSubtopic = $subtopic ?? $this->extractSubtopicFromCode($cp) ?? $this->extractSubtopicFromCode($cc);
+
         return [
             'question_number' => $number,
             'scenario' => $scenario,
@@ -219,7 +296,7 @@ class QuestionTextParser
             'clinical_presentation' => $cp,
             'condition_code' => $cc,
             'topic' => $topic,
-            'subtopic' => $this->getSubtopicFromCC($cc),
+            'subtopic' => $finalSubtopic,
             'guideline_reference' => $guidelineInfo['reference'] ?? null,
             'guideline_excerpt' => $guidelineInfo['excerpt'] ?? null,
             'guideline_source' => $guidelineInfo['source'] ?? null,
@@ -231,10 +308,29 @@ class QuestionTextParser
         ];
     }
 
+    /**
+     * Extract subtopic dynamically from CP or CC code string.
+     * E.g., "OptP1. Diplopia" -> "Diplopia"
+     */
+    private function extractSubtopicFromCode(?string $code): ?string
+    {
+        if (!$code) {
+            return null;
+        }
+        
+        // Extract the text after the code number and period
+        // Pattern: "OptP1. Diplopia" or "CC1. Acute Coronary Syndromes"
+        if (preg_match('/^[A-Za-z]+[PC]?\d+\.\s*(.+)$/i', $code, $match)) {
+            return trim($match[1]);
+        }
+        
+        return null;
+    }
+
     private function extractStem(string $block): ?string
     {
-        // Remove CP/CC lines from start
-        $block = preg_replace('/^(CP\d+|CC\d+)[^\n]*\n?/m', '', $block);
+        // Remove CP/CC lines from start (dynamic pattern - any prefix followed by P or C and numbers)
+        $block = preg_replace('/^[A-Za-z]+[PC]\d+[^\n]*\n?/m', '', $block);
         $block = trim($block);
 
         // Find everything before the first option (A. or Option A)
@@ -247,8 +343,8 @@ class QuestionTextParser
             // Remove leading question numbers (like "1. " or "Question 1:" or "a. ")
             $stem = preg_replace('/^(Question\s+)?[a-z]?[0-9]+[\.:]\s*/i', '', $stem);
 
-            // Remove any remaining CP/CC references
-            $stem = preg_replace('/^(CP\d+|CC\d+)[^\n]*\n?/m', '', $stem);
+            // Remove any remaining CP/CC references (dynamic pattern)
+            $stem = preg_replace('/^[A-Za-z]+[PC]\d+[^\n]*\n?/m', '', $stem);
 
             // Remove "Correct Answer" lines that might appear before options
             $stem = preg_replace('/Correct\s+answer[:\s]+[A-E]\.?\s*[^\n]*\n?/i', '', $stem);
@@ -603,32 +699,4 @@ class QuestionTextParser
         return $info;
     }
 
-    private function getSubtopicFromCC(?string $cc): ?string
-    {
-        if (!$cc) {
-            return null;
-        }
-
-        $subtopicMap = [
-            'CC1' => 'Acute Coronary Syndromes',
-            'CC2' => 'Myocardial Infarction',
-            'CC3' => 'Arrhythmias',
-            'CC4' => 'Cardiac Failure',
-            'CC5' => 'Cardiac Tamponade',
-            'CC6' => 'Congenital Heart Disease',
-            'CC7' => 'Diseases of the Arteries',
-            'CC8' => 'Diseases of Myocardium',
-            'CC9' => 'Hypertensive Emergencies',
-            'CC10' => 'Pacemaker Function & Failure',
-            'CC11' => 'Pericardial Disease',
-            'CC12' => 'Sudden Cardiac Death',
-            'CC13' => 'Valvular Heart Disease',
-        ];
-
-        if (preg_match('/CC(\d+)/', $cc, $match)) {
-            return $subtopicMap['CC' . $match[1]] ?? null;
-        }
-
-        return null;
-    }
 }
