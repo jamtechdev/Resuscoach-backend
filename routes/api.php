@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CoachingController;
 use App\Http\Controllers\Api\ExamController;
 use App\Http\Controllers\Api\RevisionController;
+use App\Http\Controllers\Api\VoiceController;
 use Illuminate\Support\Facades\Route;
 
 // API v1 routes
@@ -53,6 +54,8 @@ Route::prefix('v1')->group(function () {
 
         // Protected coaching routes
         Route::prefix('coaching')->name('api.coaching.')->group(function () {
+            Route::post('voice/text-to-speech', [VoiceController::class, 'textToSpeech'])->name('voice.text-to-speech');
+            Route::post('voice/speech-to-text', [VoiceController::class, 'speechToText'])->name('voice.speech-to-text');
             Route::post('/start/{examId}', [CoachingController::class, 'start'])->name('start');
             Route::get('/{sessionId}', [CoachingController::class, 'show'])->name('show');
             Route::get('/{sessionId}/questions', [CoachingController::class, 'getAllQuestions'])->name('get-all-questions');

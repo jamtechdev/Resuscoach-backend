@@ -40,6 +40,9 @@ return [
         'model' => env('OPENAI_MODEL', 'gpt-4'),
         'max_tokens' => env('OPENAI_MAX_TOKENS', 1000),
         'temperature' => env('OPENAI_TEMPERATURE', 0.7),
+        'tts_model' => env('OPENAI_TTS_MODEL', 'tts-1'),
+        'tts_voice' => env('OPENAI_TTS_VOICE', 'alloy'),
+        'whisper_model' => env('OPENAI_WHISPER_MODEL', 'whisper-1'),
     ],
 
 ];
