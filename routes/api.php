@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CoachingController;
+use App\Http\Controllers\Api\ContactController;
 use App\Http\Controllers\Api\ExamController;
 use App\Http\Controllers\Api\RevisionController;
 use App\Http\Controllers\Api\VoiceController;
@@ -24,6 +25,9 @@ Route::prefix('v1')->group(function () {
     Route::prefix('exams')->name('api.exams.')->group(function () {
         Route::get('/topics', [ExamController::class, 'getTopics'])->name('topics');
     });
+
+    // Public contact route
+    Route::post('/contact', [ContactController::class, 'submit'])->name('contact.submit');
 
     // Protected routes
     Route::middleware('auth:sanctum')->group(function () {
