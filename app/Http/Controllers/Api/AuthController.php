@@ -13,7 +13,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
+use Throwable;
 
 class AuthController extends Controller
 {
@@ -29,8 +31,16 @@ class AuthController extends Controller
             'is_admin' => false,
         ]);
 
-        // Send email verification notification
-        $user->sendEmailVerificationNotification();
+        // Send email verification notification (non-blocking: registration succeeds even if mail fails)
+        try {
+            $user->sendEmailVerificationNotification();
+        } catch (Throwable $e) {
+            Log::warning('Could not send verification email after registration', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         $token = $user->createToken('auth_token')->plainTextToken;
 

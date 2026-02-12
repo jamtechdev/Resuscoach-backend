@@ -21,18 +21,22 @@ class AdminPanelProvider extends PanelProvider
 {
     public function panel(Panel $panel): Panel
     {
+        $burgundy = '#800020';
+
         return $panel
             ->default()
             ->id('admin')
             ->path('admin')
             ->login()
             ->brandName('ResusCoach')
+            ->brandLogo(asset('images/logo.png'))
+            ->brandLogoHeight('2.5rem')
             ->colors([
-                'primary' => Color::hex('#0ea5e9'), // Sky blue - professional medical theme
-                'danger' => Color::hex('#ef4444'),  // Red
-                'success' => Color::hex('#10b981'),  // Emerald green
-                'warning' => Color::hex('#f59e0b'),  // Amber
-                'info' => Color::hex('#3b82f6'),     // Blue
+                'primary' => Color::hex($burgundy),   // Burgundy theme
+                'danger' => Color::hex('#ef4444'),    // Red
+                'success' => Color::hex('#10b981'),   // Emerald green
+                'warning' => Color::hex('#f59e0b'),   // Amber
+                'info' => Color::hex($burgundy),       // Burgundy
                 'gray' => Color::Zinc,
             ])
             ->font('Inter')

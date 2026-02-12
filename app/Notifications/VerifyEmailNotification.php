@@ -12,7 +12,7 @@ class VerifyEmailNotification extends VerifyEmail
     /**
      * Build the mail representation of the notification with explicit sender name.
      */
-    public function toMail(object $notifiable): MailMessage
+    public function toMail($notifiable)
     {
         $message = parent::toMail($notifiable);
 
