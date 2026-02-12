@@ -51,6 +51,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/{id}', [ExamController::class, 'show'])->name('show');
             Route::get('/{id}/flagged', [ExamController::class, 'getFlaggedQuestions'])->name('flagged');
             Route::post('/{id}/answer', [ExamController::class, 'submitAnswer'])->name('answer');
+            Route::post('/{id}/pause', [ExamController::class, 'pause'])->name('pause');
             Route::post('/{id}/flag', [ExamController::class, 'flagQuestion'])->name('flag');
             Route::post('/{id}/submit', [ExamController::class, 'submit'])->name('submit');
             Route::get('/{id}/results', [ExamController::class, 'results'])->name('results');

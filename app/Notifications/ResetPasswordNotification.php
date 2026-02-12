@@ -3,11 +3,25 @@
 namespace App\Notifications;
 
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\URL;
 
 class ResetPasswordNotification extends ResetPassword
 {
+    /**
+     * Build the mail representation of the notification with explicit sender name.
+     */
+    public function toMail(object $notifiable): MailMessage
+    {
+        $message = parent::toMail($notifiable);
+
+        return $message->from(
+            config('mail.from.address'),
+            config('mail.from.name')
+        );
+    }
+
     /**
      * Get the reset URL for the given notifiable.
      */

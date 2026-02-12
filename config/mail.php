@@ -111,7 +111,8 @@ return [
 
     'from' => [
         'address' => env('MAIL_FROM_ADDRESS', 'noreply@resuscoach.com'),
-        'name' => env('MAIL_FROM_NAME', 'ResusCoach'),
+        // Use ResusCoach when MAIL_FROM_NAME is not set or empty (avoids showing APP_NAME e.g. "Laravel")
+        'name' => env('MAIL_FROM_NAME') ?: 'ResusCoach',
     ],
 
 ];

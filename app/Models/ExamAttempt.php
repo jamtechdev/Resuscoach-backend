@@ -22,6 +22,7 @@ class ExamAttempt extends Model
         'total_questions',
         'correct_count',
         'status',
+        'current_question_index',
     ];
 
     protected function casts(): array

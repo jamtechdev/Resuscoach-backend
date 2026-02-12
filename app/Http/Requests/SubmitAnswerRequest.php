@@ -20,6 +20,8 @@ class SubmitAnswerRequest extends FormRequest
                 'required',
                 Rule::in(['A', 'B', 'C', 'D', 'E']),
             ],
+            // Optional: frontend sends remaining time so backend can persist it for pause/resume
+            'remaining_seconds' => ['sometimes', 'integer', 'min:0'],
         ];
     }
 

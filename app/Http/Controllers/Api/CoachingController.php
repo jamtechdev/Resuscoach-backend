@@ -26,6 +26,27 @@ class CoachingController extends Controller
     }
 
     /**
+     * Log exception and return a consistent JSON error response for better API experience.
+     */
+    private function logAndRespond(\Throwable $e, string $message, int $status = 500, array $context = []): JsonResponse
+    {
+        $logContext = array_merge($context, [
+            'error' => $e->getMessage(),
+            'exception' => get_class($e),
+        ]);
+        if (!app()->environment('production')) {
+            $logContext['trace'] = $e->getTraceAsString();
+        }
+
+        Log::error($message, $logContext);
+
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], $status);
+    }
+
+    /**
      * Start a coaching session from a completed exam attempt.
      *
      * Selects incorrect and flagged questions (targeting ~10 questions)
@@ -128,17 +149,11 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Exam not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to start coaching session', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to start coaching session. Please try again.', 500, [
                 'exam_id' => $examId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to start coaching session. Please try again.',
-            ], 500);
         }
     }
 
@@ -186,6 +201,9 @@ class CoachingController extends Controller
                 }
             }
 
+            $maxDurationSeconds = (int) config('coaching.max_duration_seconds', 1800);
+            $remainingSeconds = max(0, $maxDurationSeconds - $elapsedSeconds);
+
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -197,6 +215,8 @@ class CoachingController extends Controller
                     'completed_at' => $session->completed_at?->toIso8601String(),
                     'elapsed_seconds' => $elapsedSeconds,
                     'total_duration_seconds' => $session->total_duration_seconds,
+                    'max_duration_seconds' => $maxDurationSeconds,
+                    'remaining_seconds' => $remainingSeconds,
                     'questions_reviewed' => $session->questions_reviewed,
                     'questions_to_review' => $questionIds,
                     'current_question_id' => $session->current_question_id,
@@ -208,17 +228,11 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Coaching session not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch coaching session', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to fetch coaching session.', 500, [
                 'session_id' => $sessionId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch coaching session.',
-            ], 500);
         }
     }
 
@@ -326,17 +340,11 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Coaching session not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to get all questions', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to load questions.', 500, [
                 'session_id' => $sessionId,
-                'user_id' => $request->user()->id, 
-                'error' => $e->getMessage(),
+                'user_id' => $request->user()->id,
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to load questions.',
-            ], 500);
         }
     }
 
@@ -630,18 +638,12 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Coaching session or question not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to get current step', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to get current step. Please try again.', 500, [
                 'session_id' => $sessionId,
                 'question_id' => $questionId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to get current step. Please try again.',
-            ], 500);
         }
     }
 
@@ -708,17 +710,11 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Coaching session, question, or dialogue not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to submit response', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to submit response. Please try again.', 500, [
                 'session_id' => $sessionId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to submit response. Please try again.',
-            ], 500);
         }
     }
 
@@ -763,17 +759,11 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Coaching session not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to pause coaching session', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to pause session. Please try again.', 500, [
                 'session_id' => $sessionId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to pause session. Please try again.',
-            ], 500);
         }
     }
 
@@ -822,17 +812,11 @@ class CoachingController extends Controller
                 'message' => 'Validation failed.',
                 'errors' => $e->errors(),
             ], 422);
-        } catch (\Exception $e) {
-            Log::error('Failed to update current question', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to update current question.', 500, [
                 'session_id' => $sessionId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to update current question.',
-            ], 500);
         }
     }
 
@@ -872,17 +856,11 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Coaching session not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to resume coaching session', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to resume session. Please try again.', 500, [
                 'session_id' => $sessionId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to resume session. Please try again.',
-            ], 500);
         }
     }
 
@@ -974,17 +952,11 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Coaching session not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to complete coaching session', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to complete session. Please try again.', 500, [
                 'session_id' => $sessionId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to complete session. Please try again.',
-            ], 500);
         }
     }
 
@@ -1033,17 +1005,11 @@ class CoachingController extends Controller
                 'success' => false,
                 'message' => 'Coaching session not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch coaching summary', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to fetch coaching summary.', 500, [
                 'session_id' => $sessionId,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch coaching summary.',
-            ], 500);
         }
     }
 }

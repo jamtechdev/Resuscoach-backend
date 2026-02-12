@@ -21,6 +21,27 @@ use Illuminate\Support\Facades\Log;
 class ExamController extends Controller
 {
     /**
+     * Log exception and return a consistent JSON error response for better API experience.
+     */
+    private function logAndRespond(\Throwable $e, string $message, int $status = 500, array $context = []): JsonResponse
+    {
+        $logContext = array_merge($context, [
+            'error' => $e->getMessage(),
+            'exception' => get_class($e),
+        ]);
+        if (!app()->environment('production')) {
+            $logContext['trace'] = $e->getTraceAsString();
+        }
+
+        Log::error($message, $logContext);
+
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], $status);
+    }
+
+    /**
      * Get available topics and subtopics for exam filtering.
      * Returns all active topics with their subtopics and question counts.
      * This is available to all authenticated users to help them filter exams.
@@ -57,24 +78,17 @@ class ExamController extends Controller
                 'success' => true,
                 'data' => $topics,
             ]);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch topics', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch topics.',
-            ], 500);
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to fetch topics.', 500);
         }
     }
 
     /**
      * Start a new exam attempt.
      *
-     * Randomly selects up to 40 active questions (or all available if less than 40)
+     * Randomly selects exactly 25 active questions (or all available if less than 25)
      * based on optional topic/subtopic filters and creates an exam attempt.
+     * Time limit: 30 minutes (1800 seconds).
      */
     public function start(StartExamRequest $request): JsonResponse
     {
@@ -109,9 +123,10 @@ class ExamController extends Controller
                 $query->where('subtopic', $request->subtopic);
             }
 
-            // Get up to 40 random questions (or all available if less than 40)
+            // Exactly 25 questions per exam (or all available if less than 25)
+            $questionsPerExam = (int) config('exam.questions_per_exam', 25);
             $questions = $query->inRandomOrder()
-                ->limit(40)
+                ->limit($questionsPerExam)
                 ->get();
 
             // Use actual count of questions retrieved
@@ -120,12 +135,13 @@ class ExamController extends Controller
             DB::beginTransaction();
 
             try {
-                // Create exam attempt
+                // 30 minutes = 1800 seconds
+                $examDurationSeconds = (int) config('exam.duration_seconds', 1800);
                 $examAttempt = ExamAttempt::create([
                     'user_id' => $user->id,
                     'started_at' => now(),
-                    'expires_at' => now()->addMinutes(45), // 45 minutes = 2700 seconds
-                    'total_questions' => $questionCount, // Use actual count of questions available
+                    'expires_at' => now()->addSeconds($examDurationSeconds),
+                    'total_questions' => $questionCount,
                     'status' => 'in_progress',
                 ]);
 
@@ -150,20 +166,14 @@ class ExamController extends Controller
                     'message' => 'Exam started successfully.',
                     'data' => new ExamAttemptResource($examAttempt),
                 ], 201);
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 DB::rollBack();
                 throw $e;
             }
-        } catch (\Exception $e) {
-            Log::error('Failed to start exam', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to start exam. Please try again.', 500, [
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to start exam. Please try again.',
-            ], 500);
         }
     }
 
@@ -197,17 +207,11 @@ class ExamController extends Controller
                 'success' => false,
                 'message' => 'Exam not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch exam', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to fetch exam details.', 500, [
                 'exam_id' => $id,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch exam details.',
-            ], 500);
         }
     }
 
@@ -255,6 +259,12 @@ class ExamController extends Controller
                 'answered_at' => now(),
             ]);
 
+            // Persist remaining time when frontend sends it (for pause/resume across devices)
+            if ($request->filled('remaining_seconds')) {
+                $remaining = (int) $request->remaining_seconds;
+                $examAttempt->update(['expires_at' => now()->addSeconds($remaining)]);
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Answer submitted successfully.',
@@ -265,17 +275,11 @@ class ExamController extends Controller
                 'success' => false,
                 'message' => 'Exam or question not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to submit answer', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to submit answer. Please try again.', 500, [
                 'exam_id' => $id,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to submit answer. Please try again.',
-            ], 500);
         }
     }
 
@@ -322,17 +326,11 @@ class ExamController extends Controller
                 'success' => false,
                 'message' => 'Exam or question not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to flag question', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to flag question. Please try again.', 500, [
                 'exam_id' => $id,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to flag question. Please try again.',
-            ], 500);
         }
     }
 
@@ -372,17 +370,77 @@ class ExamController extends Controller
                 'success' => false,
                 'message' => 'Exam not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to submit exam', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to submit exam. Please try again.', 500, [
                 'exam_id' => $id,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Pause exam: store remaining time so timer is correct when user resumes.
+     * Body: { "remaining_seconds": 1234 }
+     */
+    public function pause(Request $request, int $id): JsonResponse
+    {
+        try {
+            $user = $request->user();
+
+            $examAttempt = ExamAttempt::where('id', $id)
+                ->where('user_id', $user->id)
+                ->firstOrFail();
+
+            if ($examAttempt->status !== 'in_progress') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only in-progress exams can be paused.',
+                ], 403);
+            }
+
+            $remaining = $request->input('remaining_seconds');
+            if ($remaining === null || $remaining === '') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'remaining_seconds is required.',
+                ], 400);
+            }
+
+            $remaining = (int) $remaining;
+            if ($remaining < 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'remaining_seconds must be non-negative.',
+                ], 400);
+            }
+
+            $update = ['expires_at' => now()->addSeconds($remaining)];
+            if ($request->has('current_question_index')) {
+                $idx = (int) $request->input('current_question_index');
+                if ($idx >= 0) {
+                    $update['current_question_index'] = $idx;
+                }
+            }
+            $examAttempt->update($update);
 
             return response()->json([
+                'success' => true,
+                'message' => 'Exam paused. Remaining time saved.',
+                'data' => [
+                    'remaining_seconds' => $remaining,
+                    'current_question_index' => $examAttempt->current_question_index,
+                ],
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
                 'success' => false,
-                'message' => 'Failed to submit exam. Please try again.',
-            ], 500);
+                'message' => 'Exam not found.',
+            ], 404);
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to pause exam.', 500, [
+                'exam_id' => $id,
+                'user_id' => $request->user()->id,
+            ]);
         }
     }
 
@@ -426,17 +484,11 @@ class ExamController extends Controller
                 'success' => false,
                 'message' => 'Exam not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch flagged questions', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to fetch flagged questions.', 500, [
                 'exam_id' => $id,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch flagged questions.',
-            ], 500);
         }
     }
 
@@ -470,17 +522,11 @@ class ExamController extends Controller
                 'success' => false,
                 'message' => 'Exam not found.',
             ], 404);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch exam results', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to fetch exam results.', 500, [
                 'exam_id' => $id,
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch exam results.',
-            ], 500);
         }
     }
 
@@ -554,16 +600,10 @@ class ExamController extends Controller
                     'to' => $exams->lastItem(),
                 ],
             ]);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch exam history', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to fetch exam history.', 500, [
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch exam history.',
-            ], 500);
         }
     }
 
@@ -712,17 +752,10 @@ class ExamController extends Controller
                     'recent_exams' => ExamHistoryResource::collection($recentExams),
                 ],
             ]);
-        } catch (\Exception $e) {
-            Log::error('Failed to fetch exam statistics', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to fetch exam statistics.', 500, [
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch exam statistics.',
-            ], 500);
         }
     }
 
@@ -751,16 +784,10 @@ class ExamController extends Controller
                 'has_in_progress' => false,
                 'data' => null,
             ]);
-        } catch (\Exception $e) {
-            Log::error('Failed to check in-progress exam', [
+        } catch (\Throwable $e) {
+            return $this->logAndRespond($e, 'Failed to check exam status.', 500, [
                 'user_id' => $request->user()->id,
-                'error' => $e->getMessage(),
             ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to check exam status.',
-            ], 500);
         }
     }
 

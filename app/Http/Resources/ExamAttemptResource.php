@@ -26,18 +26,18 @@ class ExamAttemptResource extends JsonResource
             'status' => $this->status,
             'total_questions' => $this->total_questions,
             'remaining_seconds' => $this->remaining_seconds,
+            'current_question_index' => $this->when(isset($this->current_question_index), $this->current_question_index),
             'is_expired' => $this->isExpired(),
             'is_in_progress' => $this->isInProgress(),
 
-            // Exam instructionsimage.png
+            // Exam instructions
             'instructions' => [
                 'title' => 'Exam Instructions',
-                'duration' => 'You have 45 minutes to complete this exam.',
+                'duration' => 'You have 30 minutes to complete this exam.',
                 'total_questions' => "This exam contains {$this->total_questions} questions.",
                 'rules' => [
                     'Read each question carefully before selecting your answer.',
                     'You can navigate between questions at any time.',
-                    'You can flag questions to review later.',
                     'You can change your answers before submitting the exam.',
                     'Once you submit the exam, you cannot make any changes.',
                     'The exam will automatically submit when the time expires.',
@@ -47,8 +47,6 @@ class ExamAttemptResource extends JsonResource
                 'tips' => [
                     'Manage your time wisely - you have approximately 1 minute per question.',
                     'Answer all questions - unanswered questions will be marked as incorrect.',
-                    'Use the flag feature to mark questions you want to review.',
-                    'Review your flagged questions before submitting.',
                 ],
             ],
 
