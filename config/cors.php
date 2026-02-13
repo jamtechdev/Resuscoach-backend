@@ -23,6 +23,7 @@ return [
             'http://127.0.0.1:3000',
             'http://localhost:8000',
             'http://127.0.0.1:8000',
+            'https://resuscoach.com'
         ],
         array_filter([
             env('FRONTEND_URL'),
