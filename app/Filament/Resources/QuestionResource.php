@@ -10,6 +10,7 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Group;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -273,14 +274,26 @@ class QuestionResource extends Resource
                             ->afterStateUpdated(function ($state, callable $set) {
                                 if (!$state) {
                                     $set('image_url', null);
+                                    $set('image_upload', null);
                                 }
                             }),
+                        FileUpload::make('image_upload')
+                            ->label('Upload image')
+                            ->disk('public')
+                            ->directory('question-images')
+                            ->image()
+                            ->maxSize(5120)
+                            ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+                            ->helperText('Upload an image or ECG (max 5 MB). JPEG, PNG, GIF, WebP.')
+                            ->visible(fn($get) => $get('has_image'))
+                            ->columnSpanFull()
+                            ->dehydrated(true),
                         TextInput::make('image_url')
-                            ->label('Image/ECG URL')
+                            ->label('Or use image URL')
                             ->url()
                             ->placeholder('https://example.com/image.jpg')
                             ->maxLength(500)
-                            ->helperText('URL to question image, ECG, or diagram')
+                            ->helperText('Alternatively, paste a URL to an image, ECG, or diagram')
                             ->visible(fn($get) => $get('has_image'))
                             ->columnSpanFull(),
                     ])

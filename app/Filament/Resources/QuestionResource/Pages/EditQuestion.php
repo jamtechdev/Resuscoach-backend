@@ -22,4 +22,13 @@ class EditQuestion extends EditRecord
     {
         return $this->getResource()::getUrl('index');
     }
+
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        if (!empty($data['image_upload'])) {
+            $data['image_url'] = asset('storage/' . ltrim($data['image_upload'], '/'));
+        }
+        unset($data['image_upload']);
+        return $data;
+    }
 }

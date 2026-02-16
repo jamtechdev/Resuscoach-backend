@@ -13,4 +13,13 @@ class CreateQuestion extends CreateRecord
     {
         return $this->getResource()::getUrl('index');
     }
+
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        if (!empty($data['image_upload'])) {
+            $data['image_url'] = asset('storage/' . ltrim($data['image_upload'], '/'));
+        }
+        unset($data['image_upload']);
+        return $data;
+    }
 }
