@@ -21,6 +21,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
@@ -357,7 +358,11 @@ class QuestionResource extends Resource
             ])
             ->filters([
                 SelectFilter::make('topic')
-                    ->options(fn() => Question::distinct()->pluck('topic', 'topic')->toArray()),
+                    ->label('Topic')
+                    ->options(fn() => Question::query()->distinct()->orderBy('topic')->pluck('topic', 'topic')->toArray())
+                    ->searchable()
+                    ->preload()
+                    ->placeholder('All topics'),
                 SelectFilter::make('clinical_presentation')
                     ->label('Clinical Presentation')
                     ->options(fn() => Question::distinct()->whereNotNull('clinical_presentation')->pluck('clinical_presentation', 'clinical_presentation')->toArray()),
@@ -380,7 +385,11 @@ class QuestionResource extends Resource
                     ->placeholder('All Questions')
                     ->trueLabel('With Images')
                     ->falseLabel('Without Images'),
-            ])
+            ], layout: FiltersLayout::AboveContent)
+            ->filtersFormColumns(2)
+            ->persistFiltersInSession()
+            ->persistSearchInSession()
+            ->persistSortInSession()
             ->actions([
                 ViewAction::make(),
                 EditAction::make(),
