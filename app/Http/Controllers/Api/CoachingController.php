@@ -376,7 +376,7 @@ class CoachingController extends Controller
                 ->where('question_id', $questionId)
                 ->firstOrFail();
 
-            // Get existing dialogues for this question
+            // Load conversation only for this question. Each question has its own dialogue thread.
             $dialogues = CoachingDialogue::where('session_id', $sessionId)
                 ->where('question_id', $questionId)
                 ->orderBy('step_number')
@@ -438,6 +438,7 @@ class CoachingController extends Controller
                 return response()->json([
                     'success' => true,
                     'data' => [
+                        'question_id' => $questionId,
                         'step_number' => 1,
                         'question' => [
                             'id' => $question->id,
@@ -487,6 +488,7 @@ class CoachingController extends Controller
                 return response()->json([
                     'success' => true,
                     'data' => [
+                        'question_id' => $questionId,
                         'step_number' => 2,
                         'ai_prompt' => $aiPrompt,
                         'waiting_for_response' => true,
@@ -535,6 +537,7 @@ class CoachingController extends Controller
                 return response()->json([
                     'success' => true,
                     'data' => [
+                        'question_id' => $questionId,
                         'step_number' => 3,
                         'correct_answer' => $question->correct_option,
                         'explanation' => $explanation,
@@ -581,6 +584,7 @@ class CoachingController extends Controller
                 return response()->json([
                     'success' => true,
                     'data' => [
+                        'question_id' => $questionId,
                         'step_number' => 4,
                         'ai_prompt' => $aiPrompt,
                         'waiting_for_response' => true,
@@ -621,6 +625,7 @@ class CoachingController extends Controller
                 return response()->json([
                     'success' => true,
                     'data' => [
+                        'question_id' => $questionId,
                         'step_number' => 5,
                         'ai_feedback' => $aiFeedback,
                         'is_question_complete' => true,
@@ -668,7 +673,7 @@ class CoachingController extends Controller
 
             $question = Question::findOrFail($request->question_id);
 
-            // Get the dialogue that's waiting for response
+            // Load dialogue for this question only (session + question_id + step). Do not reuse another question's context.
             $dialogue = CoachingDialogue::where('session_id', $sessionId)
                 ->where('question_id', $request->question_id)
                 ->where('step_number', $request->step_number)
@@ -700,6 +705,7 @@ class CoachingController extends Controller
                 'success' => true,
                 'message' => 'Response submitted successfully.',
                 'data' => [
+                    'question_id' => $request->question_id,
                     'step_number' => $request->step_number,
                     'user_response' => $request->response,
                     'next_step' => $request->step_number === 2 ? 3 : ($request->step_number === 4 ? 5 : null),

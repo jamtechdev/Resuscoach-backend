@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -15,17 +16,28 @@ class OpenAIVoiceService
 
     private string $whisperModel;
 
+    private int $ttsCacheTtl;
+
+    private int $connectTimeout;
+
     public function __construct()
     {
         $this->apiKey = config('services.openai.api_key');
         $this->ttsModel = config('services.openai.tts_model', 'tts-1');
         $this->ttsVoice = config('services.openai.tts_voice', 'alloy');
         $this->whisperModel = config('services.openai.whisper_model', 'whisper-1');
+        $this->ttsCacheTtl = (int) config('services.openai.tts_cache_ttl', 604800); // 7 days
+        $this->connectTimeout = (int) config('services.openai.connect_timeout', 10);
+    }
+
+    private function ttsCacheKey(string $text): string
+    {
+        return 'voice_tts:' . md5($text . '|' . $this->ttsVoice . '|' . $this->ttsModel);
     }
 
     /**
      * Convert text to speech using OpenAI TTS API.
-     * Returns raw audio bytes (MP3).
+     * Returns raw audio bytes (MP3). Repeated same text is served from cache for instant response.
      */
     public function textToSpeech(string $text): string
     {
@@ -39,21 +51,29 @@ class OpenAIVoiceService
             throw new \InvalidArgumentException('Text cannot be empty.');
         }
 
-        // API limit is 4096 characters
         if (mb_strlen($text) > 4096) {
             $text = mb_substr($text, 0, 4096);
+        }
+
+        $cacheKey = $this->ttsCacheKey($text);
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached;
         }
 
         try {
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $this->apiKey,
                 'Content-Type' => 'application/json',
-            ])->timeout(60)->post('https://api.openai.com/v1/audio/speech', [
-                'model' => $this->ttsModel,
-                'input' => $text,
-                'voice' => $this->ttsVoice,
-                'response_format' => 'mp3',
-            ]);
+            ])
+                ->connectTimeout($this->connectTimeout)
+                ->timeout(60)
+                ->post('https://api.openai.com/v1/audio/speech', [
+                    'model' => $this->ttsModel,
+                    'input' => $text,
+                    'voice' => $this->ttsVoice,
+                    'response_format' => 'mp3',
+                ]);
 
             if ($response->failed()) {
                 Log::error('OpenAI TTS request failed', [
@@ -63,7 +83,12 @@ class OpenAIVoiceService
                 throw new \Exception('Text-to-speech request failed: ' . $response->body());
             }
 
-            return $response->body();
+            $body = $response->body();
+            if ($this->ttsCacheTtl > 0) {
+                Cache::put($cacheKey, $body, $this->ttsCacheTtl);
+            }
+
+            return $body;
         } catch (\Exception $e) {
             Log::error('OpenAI TTS error', ['message' => $e->getMessage()]);
             throw $e;
@@ -97,6 +122,7 @@ class OpenAIVoiceService
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $this->apiKey,
             ])
+                ->connectTimeout($this->connectTimeout)
                 ->timeout(60)
                 ->attach('file', $contents, $filename)
                 ->post('https://api.openai.com/v1/audio/transcriptions', [

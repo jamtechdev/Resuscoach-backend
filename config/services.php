@@ -42,6 +42,8 @@ return [
         'temperature' => env('OPENAI_TEMPERATURE', 0.7),
         'tts_model' => env('OPENAI_TTS_MODEL', 'tts-1'),
         'tts_voice' => env('OPENAI_TTS_VOICE', 'alloy'),
+        'tts_cache_ttl' => env('OPENAI_TTS_CACHE_TTL', 604800), // 7 days (0 = disable cache)
+        'connect_timeout' => env('OPENAI_CONNECT_TIMEOUT', 10),
         'whisper_model' => env('OPENAI_WHISPER_MODEL', 'whisper-1'),
     ],
 

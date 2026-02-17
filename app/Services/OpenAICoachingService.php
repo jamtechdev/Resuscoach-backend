@@ -19,7 +19,7 @@ class OpenAICoachingService
         $this->apiKey = config('services.openai.api_key');
         $this->model = config('services.openai.model', 'gpt-4');
         $this->maxTokens = config('services.openai.max_tokens', 1000);
-        $this->temperature = config('services.openai.temperature', 0.7);
+        $this->temperature = config('services.openai.temperature', 0.4);
     }
 
     /**
@@ -30,9 +30,13 @@ class OpenAICoachingService
         return "You are an expert MRCEM (Membership of the Royal College of Emergency Medicine) exam coach.
 Your role is to help medical professionals prepare for their emergency medicine exams through Socratic questioning and guided learning.
 
+CRITICAL - Accuracy and scope:
+- Answer ONLY using the provided scenario, question stem, options, and any guideline/excerpt given to you. Do not add, invent, or assume information that is not explicitly provided.
+- Do not use external knowledge beyond what is supplied in the prompt. If something is not in the provided material, do not state it as fact.
+- When referencing guidelines, use only the guideline reference, excerpt, or URL that was provided.
+
 Key principles:
-- Use evidence-based medicine and clinical guidelines
-- Reference NICE, ESC, AHA, ACC guidelines when relevant
+- Use evidence-based medicine and clinical guidelines only when they are provided in the question/guideline data
 - Ask probing questions to understand the learner's thinking
 - Provide constructive feedback without being condescending
 - Focus on clinical reasoning and decision-making processes
@@ -46,7 +50,7 @@ Key principles:
      */
     public function generateStep2Prompt(Question $question, string $userSelectedOption): string
     {
-        $prompt = "The user selected option {$userSelectedOption} for this question:
+        $prompt = "Use ONLY the information below. Do not add or invent any facts.
 
 Question: {$question->stem}
 Scenario: " . ($question->scenario ?? 'N/A') . "
@@ -58,8 +62,9 @@ C. {$question->option_c}
 D. {$question->option_d}
 E. {$question->option_e}
 
-Generate a friendly, probing question asking the user to explain their thinking process when they selected option {$userSelectedOption}.
-The question should encourage reflection and help identify any misconceptions. Keep it conversational and supportive (1-2 sentences).";
+The user selected option {$userSelectedOption}.
+
+Generate a friendly, probing question asking the user to explain their thinking process when they selected option {$userSelectedOption}. Base your question only on the scenario and options above. Keep it conversational and supportive (1-2 sentences).";
 
         return $this->callOpenAI($prompt);
     }
@@ -82,19 +87,24 @@ The question should encourage reflection and help identify any misconceptions. K
 
         $userReasoningText = $userReasoning ? "\n\nUser's reasoning: {$userReasoning}" : '';
 
-        $prompt = "The correct answer is option {$question->correct_option}.
+        $prompt = "Answer ONLY using the information provided below. Do not add or invent any facts.
 
 Question: {$question->stem}
 Scenario: " . ($question->scenario ?? 'N/A') . "
+
+Options:
+A. {$question->option_a}
+B. {$question->option_b}
+C. {$question->option_c}
+D. {$question->option_d}
+E. {$question->option_e}
 
 User selected: Option {$userSelectedOption}
 Correct answer: Option {$question->correct_option}{$userReasoningText}
 
 {$guidelineInfo}
 
-Explain why option {$question->correct_option} is correct, referencing the guideline when applicable.
-If the user selected incorrectly, gently explain why their choice was not optimal and what the correct reasoning should be.
-Keep it educational and supportive (2-3 paragraphs).";
+Explain why option {$question->correct_option} is correct using only the scenario, options, and guideline information above. If the user selected incorrectly, gently explain why their choice was not optimal based only on this material. Do not introduce information from outside this prompt. Keep it educational and supportive (2-3 paragraphs).";
 
         return $this->callOpenAI($prompt);
     }
@@ -104,8 +114,12 @@ Keep it educational and supportive (2-3 paragraphs).";
      */
     public function generateStep4Prompt(Question $question): string
     {
-        $prompt = "The correct answer has been explained. Now ask the user to explain the correct reasoning in their own words.
-This helps reinforce learning. Make it encouraging and supportive (1-2 sentences).";
+        $prompt = "Using only the question context below, ask the user to explain the correct reasoning in their own words. Do not add or invent clinical details.
+
+Question: {$question->stem}
+Correct answer: Option {$question->correct_option}
+
+Make it encouraging and supportive (1-2 sentences).";
 
         return $this->callOpenAI($prompt);
     }
@@ -115,41 +129,39 @@ This helps reinforce learning. Make it encouraging and supportive (1-2 sentences
      */
     public function generateStep4Feedback(Question $question, string $userExplanation): string
     {
-        $prompt = "The user has provided their explanation of the correct reasoning:
+        $prompt = "Answer ONLY using the information provided below. Do not add or invent any facts.
+
+Question: {$question->stem}
+Scenario: " . ($question->scenario ?? 'N/A') . "
+Correct answer: Option {$question->correct_option}
+Correct explanation (use this as the reference): {$question->explanation}
 
 User's explanation: {$userExplanation}
 
-Question: {$question->stem}
-Correct answer: Option {$question->correct_option}
-Correct explanation: {$question->explanation}
-
-Provide constructive feedback on the user's explanation.
-- Acknowledge what they got right
-- Gently correct any misconceptions
-- Reinforce key learning points
-- Keep it encouraging (2-3 paragraphs)";
+Provide constructive feedback on the user's explanation based only on the correct explanation and scenario above. Acknowledge what they got right, gently correct any misconceptions using only this material, and reinforce key learning points. Do not introduce external or invented information. Keep it encouraging (2-3 paragraphs).";
 
         return $this->callOpenAI($prompt);
     }
 
     /**
      * Generate follow-up question for Step 5: Adjacent concepts.
+     * Only pass previousInteractions from the SAME question to avoid cross-question context.
      */
     public function generateStep5FollowUp(Question $question, array $previousInteractions = []): string
     {
         $context = '';
         if (!empty($previousInteractions)) {
-            $context = "\n\nPrevious interactions in this session:\n" . implode("\n", array_slice($previousInteractions, -3));
+            $context = "\n\nPrevious interactions for this question only:\n" . implode("\n", array_slice($previousInteractions, -3));
         }
 
-        $prompt = "Based on this question about {$question->topic} - {$question->subtopic}:
+        $prompt = "Answer only using the question context below. Do not add or invent clinical details.
 
 Question: {$question->stem}
+Scenario: " . ($question->scenario ?? 'N/A') . "
 Topic: {$question->topic}
 Subtopic: {$question->subtopic}{$context}
 
-Generate 1-2 probing questions about adjacent or related concepts that would deepen the learner's understanding.
-These should be thought-provoking but not overly complex. Keep each question concise (1 sentence each).";
+Generate 1-2 probing questions about adjacent or related concepts that would deepen the learner's understanding, based only on this question's topic and scenario. Keep each question concise (1 sentence each).";
 
         return $this->callOpenAI($prompt);
     }
