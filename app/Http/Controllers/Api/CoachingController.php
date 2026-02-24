@@ -390,11 +390,7 @@ class CoachingController extends Controller
 
                 // Step 1 is special - it just needs to be viewed (dialogue exists)
                 if ($lastDialogue->step_number === 1 && !$lastDialogue->user_response) {
-                    $currentStep = 2; // Move to Step 2 after Step 1 is viewed
-                }
-                // Step 2 is special - after user responds, move to Step 3 (no feedback needed)
-                elseif ($lastDialogue->step_number === 2 && $lastDialogue->user_response) {
-                    $currentStep = 3; // Move to Step 3 after Step 2 response
+                    $currentStep = 3; // Move to Step 3 (correct answer + resource) after Step 1 is viewed (Step 2 removed)
                 }
                 // Step 3 is special - after explanation is shown (ai_feedback exists), move to Step 4
                 elseif ($lastDialogue->step_number === 3 && $lastDialogue->ai_feedback) {
@@ -404,8 +400,8 @@ class CoachingController extends Controller
                 elseif ($lastDialogue->user_response && $lastDialogue->ai_feedback) {
                     $currentStep = min(5, $lastDialogue->step_number + 1);
                 }
-                // If last step has user response but no feedback (and it's not Step 2), we're waiting for AI
-                elseif ($lastDialogue->user_response && !$lastDialogue->ai_feedback && $lastDialogue->step_number !== 2) {
+                // If last step has user response but no feedback, we're waiting for AI
+                elseif ($lastDialogue->user_response && !$lastDialogue->ai_feedback) {
                     $currentStep = $lastDialogue->step_number;
                 }
                 // If last step has AI prompt but no user response, we're waiting for user
@@ -461,66 +457,18 @@ class CoachingController extends Controller
                 ]);
             }
 
-            // Step 2: Generate prompt asking about user's thinking
-            if ($currentStep === 2) {
-                $existingDialogue = $dialogues->where('step_number', 2)->first();
-
-                if ($existingDialogue && $existingDialogue->ai_prompt) {
-                    $aiPrompt = $existingDialogue->ai_prompt;
-                } else {
-                    // Generate AI prompt
-                    $aiPrompt = $this->coachingService->generateStep2Prompt(
-                        $question,
-                        $examAnswer->selected_option ?? 'N/A'
-                    );
-
-                    // Save the dialogue
-                    $interactionOrder = $dialogues->max('interaction_order') ?? 0;
-                    CoachingDialogue::create([
-                        'session_id' => $sessionId,
-                        'question_id' => $questionId,
-                        'step_number' => 2,
-                        'ai_prompt' => $aiPrompt,
-                        'interaction_order' => $interactionOrder + 1,
-                    ]);
-                }
-
-                return response()->json([
-                    'success' => true,
-                    'data' => [
-                        'question_id' => $questionId,
-                        'step_number' => 2,
-                        'ai_prompt' => $aiPrompt,
-                        'waiting_for_response' => true,
-                    ],
-                ]);
-            }
-
-            // Step 3: Reveal correct answer with explanation
+            // Step 3: Reveal correct answer with explanation and resource (Step 2 removed)
             if ($currentStep === 3) {
-                $step2Dialogue = $dialogues->where('step_number', 2)->first();
-
-                // Ensure step 2 is completed (user has responded)
-                if (!$step2Dialogue || !$step2Dialogue->user_response) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Please complete step 2 first by responding to the question.',
-                        'data' => [
-                            'required_step' => 2,
-                        ],
-                    ], 400);
-                }
-
                 $existingDialogue = $dialogues->where('step_number', 3)->first();
 
                 if ($existingDialogue && $existingDialogue->ai_feedback) {
                     $explanation = $existingDialogue->ai_feedback;
                 } else {
-                    // Generate explanation
+                    // Generate explanation (no user reasoning - Step 2 removed)
                     $explanation = $this->coachingService->generateStep3Explanation(
                         $question,
                         $examAnswer->selected_option ?? 'N/A',
-                        $step2Dialogue->user_response
+                        null
                     );
 
                     // Save the dialogue
@@ -541,7 +489,14 @@ class CoachingController extends Controller
                         'step_number' => 3,
                         'correct_answer' => $question->correct_option,
                         'explanation' => $explanation,
+                        'resource' => [
+                            'source' => $question->guideline_source,
+                            'reference' => $question->guideline_reference,
+                            'url' => $question->guideline_url,
+                            'excerpt' => $question->guideline_excerpt,
+                        ],
                         'guideline_reference' => $question->guideline_reference,
+                        'guideline_source' => $question->guideline_source,
                         'guideline_url' => $question->guideline_url,
                         'guideline_excerpt' => $question->guideline_excerpt,
                     ],
@@ -699,7 +654,7 @@ class CoachingController extends Controller
                     'ai_feedback' => $aiFeedback,
                 ]);
             }
-            // Step 2 and 5 don't need immediate feedback, they move to next step
+            // Step 5 doesn't need immediate feedback from respond (feedback shown in getCurrentStep)
 
             return response()->json([
                 'success' => true,
@@ -708,7 +663,7 @@ class CoachingController extends Controller
                     'question_id' => $request->question_id,
                     'step_number' => $request->step_number,
                     'user_response' => $request->response,
-                    'next_step' => $request->step_number === 2 ? 3 : ($request->step_number === 4 ? 5 : null),
+                    'next_step' => $request->step_number === 4 ? 5 : null,
                 ],
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
