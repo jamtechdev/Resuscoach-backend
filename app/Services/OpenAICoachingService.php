@@ -111,17 +111,11 @@ Explain why option {$question->correct_option} is correct using only the scenari
 
     /**
      * Generate prompt for Step 4: Ask user to explain correct reasoning.
+     * Short static message (no AI call).
      */
     public function generateStep4Prompt(Question $question): string
     {
-        $prompt = "Using only the question context below, ask the user to explain the correct reasoning in their own words. Do not add or invent clinical details.
-
-Question: {$question->stem}
-Correct answer: Option {$question->correct_option}
-
-Make it encouraging and supportive (1-2 sentences).";
-
-        return $this->callOpenAI($prompt);
+        return 'Please share your thought process in your own words.';
     }
 
     /**
