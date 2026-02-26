@@ -87,26 +87,22 @@ Generate a friendly, probing question asking the user to explain their thinking 
 
         $userReasoningText = $userReasoning ? "\n\nUser's reasoning: {$userReasoning}" : '';
 
-        $prompt = "Answer ONLY using the information provided below. Do not add or invent any facts.
+        $prompt = "You are writing the explanation for a medical exam question. Use ONLY the information provided below. Do not add or invent facts.
 
+CONTEXT (do not repeat this in your response):
 Question: {$question->stem}
 Scenario: " . ($question->scenario ?? 'N/A') . "
-
-Options:
-A. {$question->option_a}
-B. {$question->option_b}
-C. {$question->option_c}
-D. {$question->option_d}
-E. {$question->option_e}
-
-User selected: Option {$userSelectedOption}
-Correct answer: Option {$question->correct_option}{$userReasoningText}
-
+Options: A. {$question->option_a} B. {$question->option_b} C. {$question->option_c} D. {$question->option_d} E. {$question->option_e}
+Correct answer: Option {$question->correct_option}. User selected: Option {$userSelectedOption}.{$userReasoningText}
 {$guidelineInfo}
 
-Explain why option {$question->correct_option} is correct using only the scenario, options, and guideline information above. If the user selected incorrectly, gently explain why their choice was not optimal based only on this material. Do not introduce information from outside this prompt. Keep it educational and supportive (2-3 paragraphs).";
+TASK: Write a detailed explanation that will be shown to the learner. Rules:
+1. Do NOT repeat the question, scenario, or list of options (A, B, C...) in your reply.
+2. Do NOT use headings like 'Rationale:', 'Explanation:', or 'Why X is correct:' — start directly with the first sentence of your explanation.
+3. You MUST write 2–3 full paragraphs (at least 200 words). Paragraph 1: why the correct option ({$question->correct_option}) is the right choice, with clear clinical reasoning. Paragraph 2: how the scenario and any guideline support this. Paragraph 3 (optional): key takeaway or why other options are less appropriate. Write in full sentences; do not stop mid-thought.
+4. Use only the context above. Be educational, clear, and detailed.";
 
-        return $this->callOpenAI($prompt);
+        return $this->callOpenAI($prompt, 1500);
     }
 
     /**
@@ -189,19 +185,22 @@ Keep it professional, encouraging, and actionable (4-5 paragraphs).";
 
     /**
      * Make API call to OpenAI.
+     * @param int|null $maxTokensOverride Use for long responses (e.g. detailed explanation). Default from config.
      */
-    private function callOpenAI(string $userPrompt): string
+    private function callOpenAI(string $userPrompt, ?int $maxTokensOverride = null): string
     {
         if (empty($this->apiKey)) {
             Log::error('OpenAI API key is not configured');
             throw new \Exception('OpenAI API key is not configured. Please set OPENAI_API_KEY in your .env file.');
         }
 
+        $maxTokens = $maxTokensOverride ?? $this->maxTokens;
+
         try {
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $this->apiKey,
                 'Content-Type' => 'application/json',
-            ])->timeout(30)->post('https://api.openai.com/v1/chat/completions', [
+            ])->timeout(60)->post('https://api.openai.com/v1/chat/completions', [
                 'model' => $this->model,
                 'messages' => [
                     [
@@ -213,7 +212,7 @@ Keep it professional, encouraging, and actionable (4-5 paragraphs).";
                         'content' => $userPrompt,
                     ],
                 ],
-                'max_tokens' => $this->maxTokens,
+                'max_tokens' => $maxTokens,
                 'temperature' => $this->temperature,
             ]);
 

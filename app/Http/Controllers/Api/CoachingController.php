@@ -86,16 +86,33 @@ class CoachingController extends Controller
                 ], 403);
             }
 
-            // Check if coaching session already exists
+            // If a coaching session already exists for this exam, return it so user can continue (allow re-entry / multiple visits)
             $existingSession = CoachingSession::where('attempt_id', $examAttempt->id)->first();
             if ($existingSession) {
+                $incorrectAnswers = ExamAnswer::where('attempt_id', $examAttempt->id)
+                    ->where('is_correct', false)
+                    ->pluck('question_id')->toArray();
+                $flaggedQuestionIds = ExamAnswer::where('attempt_id', $examAttempt->id)
+                    ->where('is_flagged', true)
+                    ->pluck('question_id')->toArray();
+                $questionIds = $incorrectAnswers;
+                foreach ($flaggedQuestionIds as $flaggedId) {
+                    if (!in_array($flaggedId, $questionIds)) {
+                        $questionIds[] = $flaggedId;
+                    }
+                }
+                $questionIds = array_slice($questionIds, 0, 10);
                 return response()->json([
-                    'success' => false,
-                    'message' => 'Coaching session already exists for this exam.',
+                    'success' => true,
+                    'message' => 'Coaching session already exists for this exam. You can continue where you left off.',
                     'data' => [
                         'session_id' => $existingSession->id,
+                        'attempt_id' => $examAttempt->id,
+                        'questions_to_review' => count($questionIds) ?: $existingSession->questions_reviewed,
+                        'question_ids' => $questionIds,
+                        'started_at' => $existingSession->started_at->toIso8601String(),
                     ],
-                ], 409);
+                ], 200);
             }
 
             // Get incorrect and flagged questions
@@ -265,10 +282,11 @@ class CoachingController extends Controller
                 ->where('user_id', $user->id)
                 ->firstOrFail();
 
-            if ($session->status !== 'in_progress') {
+            // Allow when in_progress or paused so user can load page when returning / after "Start AI Coaching"
+            if (!in_array($session->status, ['in_progress', 'paused'], true)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Coaching session is not in progress.',
+                    'message' => 'Coaching session has ended.',
                 ], 403);
             }
 
@@ -304,22 +322,7 @@ class CoachingController extends Controller
                     ->first();
 
                 if ($question && $examAnswer) {
-                    // Create Step 1 dialogue record if not exists
-                    $existingDialogue = CoachingDialogue::where('session_id', $sessionId)
-                        ->where('question_id', $qId)
-                        ->where('step_number', 1)
-                        ->first();
-
-                    if (!$existingDialogue) {
-                        CoachingDialogue::create([
-                            'session_id' => $sessionId,
-                            'question_id' => $qId,
-                            'step_number' => 1,
-                            'ai_prompt' => null,
-                            'interaction_order' => 1,
-                        ]);
-                    }
-
+                    // No dialogue created here — first getCurrentStep hit returns step 1 (correct answer + reference)
                     $allQuestions[] = [
                         'question_id' => $question->id,
                         'question' => [
@@ -377,10 +380,11 @@ class CoachingController extends Controller
                 ->where('user_id', $user->id)
                 ->firstOrFail();
 
-            if ($session->status !== 'in_progress') {
+            // Allow step when in_progress or paused so user can still view content and end session
+            if (!in_array($session->status, ['in_progress', 'paused'], true)) {
                 return $this->noCacheJson([
                     'success' => false,
-                    'message' => 'Coaching session is not in progress.',
+                    'message' => 'Coaching session has ended.',
                 ], 403);
             }
 
@@ -399,113 +403,77 @@ class CoachingController extends Controller
                 ->orderBy('interaction_order')
                 ->get();
 
-            // Determine current step (1-5)
+            // Flow: step 1 = correct answer + explanation + resource (on Continue) → step 2 = explain your thought process → then Next question (no AI feedback).
             $currentStep = 1;
             if ($dialogues->isNotEmpty()) {
                 $lastDialogue = $dialogues->last();
-
-                // Step 1 is special - it just needs to be viewed (dialogue exists)
-                if ($lastDialogue->step_number === 1 && !$lastDialogue->user_response) {
-                    $currentStep = 3; // Move to Step 3 (correct answer + resource) after Step 1 is viewed (Step 2 removed)
-                }
-                // Step 3 is special - after explanation is shown (ai_feedback exists), move to Step 4
-                elseif ($lastDialogue->step_number === 3 && $lastDialogue->ai_feedback) {
-                    $currentStep = 4; // Move to Step 4 after Step 3 explanation
-                }
-                // If last step has user response and feedback, move to next step
-                elseif ($lastDialogue->user_response && $lastDialogue->ai_feedback) {
-                    $currentStep = min(5, $lastDialogue->step_number + 1);
-                }
-                // If last step has user response but no feedback, we're waiting for AI
-                elseif ($lastDialogue->user_response && !$lastDialogue->ai_feedback) {
-                    $currentStep = $lastDialogue->step_number;
-                }
-                // If last step has AI prompt but no user response, we're waiting for user
-                elseif ($lastDialogue->ai_prompt && !$lastDialogue->user_response) {
-                    $currentStep = $lastDialogue->step_number;
-                }
-                // Otherwise, we're on the last step
-                else {
+                if ($lastDialogue->step_number === 1 && $lastDialogue->ai_feedback) {
+                    $currentStep = 2;
+                } elseif ($lastDialogue->step_number === 2 && $lastDialogue->user_response) {
+                    $currentStep = 3; // user submitted thought process → show Next question
+                } elseif ($lastDialogue->step_number === 2) {
+                    $currentStep = 2;
+                } else {
                     $currentStep = $lastDialogue->step_number;
                 }
             }
 
-            // Step 1: Just display question (no AI call needed)
+            // When opening a question, always show step 1 first (correct answer + explanation + resource). Use ?force_step=1 on first load.
+            if ($request->query('force_step') == '1') {
+                $currentStep = 1;
+            }
+
+            // Step 1: Correct answer + explanation + resource (source/reference)
             if ($currentStep === 1) {
-                // Check if Step 1 has already been viewed (to track progress)
-                $step1Dialogue = $dialogues->where('step_number', 1)->first();
-
-                // If Step 1 hasn't been viewed yet, create a dialogue record to track it
-                if (!$step1Dialogue) {
-                    $interactionOrder = $dialogues->max('interaction_order') ?? 0;
-                    CoachingDialogue::create([
-                        'session_id' => $sessionId,
-                        'question_id' => $questionId,
-                        'step_number' => 1,
-                        'ai_prompt' => null, // Step 1 has no AI prompt
-                        'interaction_order' => $interactionOrder + 1,
-                    ]);
-                }
-
-                return $this->noCacheJson([
-                    'success' => true,
-                    'data' => [
-                        'question_id' => $questionId,
-                        'step_number' => 1,
-                        'question' => [
-                            'id' => $question->id,
-                            'stem' => $question->stem,
-                            'scenario' => $question->scenario,
-                            'options' => [
-                                'A' => $question->option_a,
-                                'B' => $question->option_b,
-                                'C' => $question->option_c,
-                                'D' => $question->option_d,
-                                'E' => $question->option_e,
-                            ],
-                        ],
-                        'user_answer' => $examAnswer->selected_option,
-                        'is_flagged' => $examAnswer->is_flagged,
-                        'is_correct' => $examAnswer->is_correct,
-                        'ai_prompt' => null,
-                        'message' => 'Review the question and your answer. Click next to continue.',
-                    ],
-                ]);
-            }
-
-            // Step 3: Reveal correct answer with explanation and resource (Step 2 removed)
-            if ($currentStep === 3) {
-                $existingDialogue = $dialogues->where('step_number', 3)->first();
+                $existingDialogue = $dialogues->where('step_number', 1)->first();
 
                 if ($existingDialogue && $existingDialogue->ai_feedback) {
                     $explanation = $existingDialogue->ai_feedback;
                 } else {
-                    // Generate explanation (no user reasoning - Step 2 removed)
-                    $explanation = $this->coachingService->generateStep3Explanation(
-                        $question,
-                        $examAnswer->selected_option ?? 'N/A',
-                        null
-                    );
+                    // Always use AI to generate explanation (use the API key). Fallback to question explanation only on failure.
+                    $storedExplanation = trim((string) ($question->explanation ?? ''));
+                    try {
+                        $explanation = $this->coachingService->generateStep3Explanation(
+                            $question,
+                            $examAnswer->selected_option ?? 'N/A',
+                            null
+                        );
+                        if ($explanation === '' || strlen(trim($explanation)) < 50) {
+                            $explanation = $storedExplanation ?: 'See the correct answer and guideline reference below.';
+                        }
+                    } catch (\Throwable $e) {
+                        Log::warning('Step 1 AI explanation failed, using question explanation', [
+                            'question_id' => $questionId,
+                            'session_id' => $sessionId,
+                            'error' => $e->getMessage(),
+                        ]);
+                        $explanation = $storedExplanation ?: 'See the correct answer and guideline reference below.';
+                    }
 
-                    // Save the dialogue
                     $interactionOrder = $dialogues->max('interaction_order') ?? 0;
                     CoachingDialogue::create([
                         'session_id' => $sessionId,
                         'question_id' => $questionId,
-                        'step_number' => 3,
+                        'step_number' => 1,
                         'ai_feedback' => $explanation,
                         'interaction_order' => $interactionOrder + 1,
                     ]);
                 }
 
-                // Re-fetch question so resource is always from current question (avoids stale/cached mismatch on live)
                 $question = Question::findOrFail($questionId);
+
+                // Only send excerpt if it's a real guideline excerpt, not question text repeated
+                $stem = trim($question->stem ?? '');
+                $excerpt = $question->guideline_excerpt;
+                if ($excerpt && (str_contains($excerpt, 'Correct answer:') || trim($excerpt) === $stem || strlen(trim($excerpt)) < 30)) {
+                    $excerpt = null;
+                }
 
                 return $this->noCacheJson([
                     'success' => true,
                     'data' => [
                         'question_id' => $questionId,
-                        'step_number' => 3,
+                        'step_number' => 1,
                         'topic' => $question->topic,
                         'correct_answer' => $question->correct_option,
                         'explanation' => $explanation,
@@ -513,44 +481,38 @@ class CoachingController extends Controller
                             'source' => $question->guideline_source,
                             'reference' => $question->guideline_reference,
                             'url' => $question->guideline_url,
-                            'excerpt' => $question->guideline_excerpt,
+                            'excerpt' => $excerpt,
                         ],
                         'guideline_reference' => $question->guideline_reference,
                         'guideline_source' => $question->guideline_source,
                         'guideline_url' => $question->guideline_url,
-                        'guideline_excerpt' => $question->guideline_excerpt,
+                        'guideline_excerpt' => $excerpt,
                     ],
                 ]);
             }
 
-            // Step 4: Ask user to explain correct reasoning
-            if ($currentStep === 4) {
-                // Ensure step 3 is completed
-                $step3Dialogue = $dialogues->where('step_number', 3)->first();
-                if (!$step3Dialogue || !$step3Dialogue->ai_feedback) {
+            // Step 2: Share your thought process
+            if ($currentStep === 2) {
+                $step1Dialogue = $dialogues->where('step_number', 1)->first();
+                if (!$step1Dialogue || !$step1Dialogue->ai_feedback) {
                     return $this->noCacheJson([
                         'success' => false,
-                        'message' => 'Please complete step 3 first.',
-                        'data' => [
-                            'required_step' => 3,
-                        ],
+                        'message' => 'Please complete step 1 first.',
+                        'data' => ['required_step' => 1],
                     ], 400);
                 }
 
-                $existingDialogue = $dialogues->where('step_number', 4)->first();
+                $existingDialogue = $dialogues->where('step_number', 2)->first();
 
                 if ($existingDialogue && $existingDialogue->ai_prompt) {
                     $aiPrompt = $existingDialogue->ai_prompt;
                 } else {
-                    // Generate prompt
-                    $aiPrompt = $this->coachingService->generateStep4Prompt($question);
-
-                    // Save the dialogue
+                    $aiPrompt = 'Explain your own thought process — what did you understand?';
                     $interactionOrder = $dialogues->max('interaction_order') ?? 0;
                     CoachingDialogue::create([
                         'session_id' => $sessionId,
                         'question_id' => $questionId,
-                        'step_number' => 4,
+                        'step_number' => 2,
                         'ai_prompt' => $aiPrompt,
                         'interaction_order' => $interactionOrder + 1,
                     ]);
@@ -560,51 +522,31 @@ class CoachingController extends Controller
                     'success' => true,
                     'data' => [
                         'question_id' => $questionId,
-                        'step_number' => 4,
+                        'step_number' => 2,
                         'ai_prompt' => $aiPrompt,
                         'waiting_for_response' => true,
                     ],
                 ]);
             }
 
-            // Step 5: Show AI feedback from step 4 and completion message
-            if ($currentStep === 5) {
-                // Ensure step 4 is completed (user has responded and feedback is generated)
-                $step4Dialogue = $dialogues->where('step_number', 4)->first();
-                if (!$step4Dialogue || !$step4Dialogue->user_response || !$step4Dialogue->ai_feedback) {
+            // Step 3: User submitted thought process — show Next question (no AI feedback)
+            if ($currentStep === 3) {
+                $step2Dialogue = $dialogues->where('step_number', 2)->first();
+                if (!$step2Dialogue || !$step2Dialogue->user_response) {
                     return $this->noCacheJson([
                         'success' => false,
-                        'message' => 'Please complete step 4 first.',
-                        'data' => [
-                            'required_step' => 4,
-                        ],
+                        'message' => 'Please complete step 2 first.',
+                        'data' => ['required_step' => 2],
                     ], 400);
-                }
-
-                // Get AI feedback from step 4
-                $aiFeedback = $step4Dialogue->ai_feedback;
-
-                // Create step 5 dialogue record if not exists
-                $existingDialogue = $dialogues->where('step_number', 5)->first();
-                if (!$existingDialogue) {
-                    $interactionOrder = $dialogues->max('interaction_order') ?? 0;
-                    CoachingDialogue::create([
-                        'session_id' => $sessionId,
-                        'question_id' => $questionId,
-                        'step_number' => 5,
-                        'ai_feedback' => $aiFeedback, // Store the feedback reference
-                        'interaction_order' => $interactionOrder + 1,
-                    ]);
                 }
 
                 return $this->noCacheJson([
                     'success' => true,
                     'data' => [
                         'question_id' => $questionId,
-                        'step_number' => 5,
-                        'ai_feedback' => $aiFeedback,
+                        'step_number' => 3,
                         'is_question_complete' => true,
-                        'message' => 'Great job! You have completed this question. Please proceed to the next question.',
+                        'message' => 'Proceed to the next question.',
                     ],
                 ]);
             }
@@ -639,10 +581,11 @@ class CoachingController extends Controller
                 ->where('user_id', $user->id)
                 ->firstOrFail();
 
-            if ($session->status !== 'in_progress') {
+            // Allow submit when in_progress or paused (same as getCurrentStep/getAllQuestions)
+            if (!in_array($session->status, ['in_progress', 'paused'], true)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Coaching session is not in progress.',
+                    'message' => 'Coaching session has ended.',
                 ], 403);
             }
 
@@ -653,7 +596,31 @@ class CoachingController extends Controller
                 ->where('question_id', $request->question_id)
                 ->where('step_number', $request->step_number)
                 ->whereNull('user_response')
-                ->firstOrFail();
+                ->first();
+
+            if (!$dialogue) {
+                // Already submitted (e.g. double submit / retry) - return success so frontend can advance
+                $existing = CoachingDialogue::where('session_id', $sessionId)
+                    ->where('question_id', $request->question_id)
+                    ->where('step_number', $request->step_number)
+                    ->first();
+                if ($existing) {
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Response already submitted.',
+                        'data' => [
+                            'question_id' => $request->question_id,
+                            'step_number' => $request->step_number,
+                            'user_response' => $existing->user_response,
+                            'next_step' => $request->step_number === 2 ? 3 : null,
+                        ],
+                    ], 200);
+                }
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Coaching session, question, or dialogue not found.',
+                ], 404);
+            }
 
             // Update dialogue with user response
             $dialogue->update([
@@ -661,21 +628,7 @@ class CoachingController extends Controller
                 'response_type' => $request->response_type ?? 'text',
             ]);
 
-            // Generate AI feedback based on step
-            // Step 4: Generate feedback but don't return it yet (will be shown in step 5)
-            if ($request->step_number === 4) {
-                // Step 4: Validate user's explanation and save feedback
-                $aiFeedback = $this->coachingService->generateStep4Feedback(
-                    $question,
-                    $request->response
-                );
-
-                $dialogue->update([
-                    'ai_feedback' => $aiFeedback,
-                ]);
-            }
-            // Step 5 doesn't need immediate feedback from respond (feedback shown in getCurrentStep)
-
+            // Step 2: Only save user's thought process — no AI feedback, next step is just "Next question"
             return response()->json([
                 'success' => true,
                 'message' => 'Response submitted successfully.',
@@ -683,7 +636,7 @@ class CoachingController extends Controller
                     'question_id' => $request->question_id,
                     'step_number' => $request->step_number,
                     'user_response' => $request->response,
-                    'next_step' => $request->step_number === 4 ? 5 : null,
+                    'next_step' => $request->step_number === 2 ? 3 : null,
                 ],
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -711,11 +664,20 @@ class CoachingController extends Controller
                 ->where('user_id', $user->id)
                 ->firstOrFail();
 
+            // Already paused or completed: treat as success so "End session" always works (idempotent)
             if ($session->status !== 'in_progress') {
                 return response()->json([
-                    'success' => false,
-                    'message' => 'Only in-progress sessions can be paused.',
-                ], 403);
+                    'success' => true,
+                    'message' => $session->status === 'paused'
+                        ? 'Session is already paused.'
+                        : 'Session has already ended.',
+                    'data' => [
+                        'session_id' => $session->id,
+                        'status' => $session->status,
+                        'paused_at' => $session->paused_at?->toIso8601String(),
+                        'current_question_id' => $session->current_question_id,
+                    ],
+                ], 200);
             }
 
             // Update current question if provided

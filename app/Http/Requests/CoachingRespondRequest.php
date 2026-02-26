@@ -14,10 +14,13 @@ class CoachingRespondRequest extends FormRequest
 
     public function rules(): array
     {
+        $stepNumber = $this->input('step_number');
+        $minResponse = ($stepNumber === 1) ? 1 : 10;
+
         return [
             'question_id' => ['required', 'integer', 'exists:questions,id'],
             'step_number' => ['required', 'integer', 'min:1', 'max:5'],
-            'response' => ['required', 'string', 'min:10', 'max:2000'],
+            'response' => ['required', 'string', 'min:' . $minResponse, 'max:2000'],
             'response_type' => ['sometimes', 'string', Rule::in(['text', 'voice'])],
         ];
     }
@@ -31,7 +34,7 @@ class CoachingRespondRequest extends FormRequest
             'step_number.min' => 'Step number must be at least 1.',
             'step_number.max' => 'Step number must be at most 5.',
             'response.required' => 'Response is required.',
-            'response.min' => 'Response must be at least 10 characters.',
+            'response.min' => 'Response must be at least :min characters.',
             'response.max' => 'Response must not exceed 2000 characters.',
             'response_type.in' => 'Response type must be either text or voice.',
         ];
