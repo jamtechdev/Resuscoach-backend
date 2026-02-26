@@ -20,9 +20,25 @@ class CoachingController extends Controller
 {
     protected OpenAICoachingService $coachingService;
 
+    /** Cache-Control so step responses are never cached (avoids wrong resource on live/CDN). */
+    private const NO_CACHE_HEADERS = [
+        'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma' => 'no-cache',
+        'Expires' => '0',
+    ];
+
     public function __construct(OpenAICoachingService $coachingService)
     {
         $this->coachingService = $coachingService;
+    }
+
+    /**
+     * Return JSON with no-cache headers. Prevents CDN/browser from serving stale step data
+     * (e.g. resource from another question) on live.
+     */
+    private function noCacheJson(array $data, int $status = 200): JsonResponse
+    {
+        return response()->json($data, $status)->withHeaders(self::NO_CACHE_HEADERS);
     }
 
     /**
@@ -362,7 +378,7 @@ class CoachingController extends Controller
                 ->firstOrFail();
 
             if ($session->status !== 'in_progress') {
-                return response()->json([
+                return $this->noCacheJson([
                     'success' => false,
                     'message' => 'Coaching session is not in progress.',
                 ], 403);
@@ -431,7 +447,7 @@ class CoachingController extends Controller
                     ]);
                 }
 
-                return response()->json([
+                return $this->noCacheJson([
                     'success' => true,
                     'data' => [
                         'question_id' => $questionId,
@@ -482,11 +498,15 @@ class CoachingController extends Controller
                     ]);
                 }
 
-                return response()->json([
+                // Re-fetch question so resource is always from current question (avoids stale/cached mismatch on live)
+                $question = Question::findOrFail($questionId);
+
+                return $this->noCacheJson([
                     'success' => true,
                     'data' => [
                         'question_id' => $questionId,
                         'step_number' => 3,
+                        'topic' => $question->topic,
                         'correct_answer' => $question->correct_option,
                         'explanation' => $explanation,
                         'resource' => [
@@ -508,7 +528,7 @@ class CoachingController extends Controller
                 // Ensure step 3 is completed
                 $step3Dialogue = $dialogues->where('step_number', 3)->first();
                 if (!$step3Dialogue || !$step3Dialogue->ai_feedback) {
-                    return response()->json([
+                    return $this->noCacheJson([
                         'success' => false,
                         'message' => 'Please complete step 3 first.',
                         'data' => [
@@ -536,7 +556,7 @@ class CoachingController extends Controller
                     ]);
                 }
 
-                return response()->json([
+                return $this->noCacheJson([
                     'success' => true,
                     'data' => [
                         'question_id' => $questionId,
@@ -552,7 +572,7 @@ class CoachingController extends Controller
                 // Ensure step 4 is completed (user has responded and feedback is generated)
                 $step4Dialogue = $dialogues->where('step_number', 4)->first();
                 if (!$step4Dialogue || !$step4Dialogue->user_response || !$step4Dialogue->ai_feedback) {
-                    return response()->json([
+                    return $this->noCacheJson([
                         'success' => false,
                         'message' => 'Please complete step 4 first.',
                         'data' => [
@@ -577,7 +597,7 @@ class CoachingController extends Controller
                     ]);
                 }
 
-                return response()->json([
+                return $this->noCacheJson([
                     'success' => true,
                     'data' => [
                         'question_id' => $questionId,
@@ -589,12 +609,12 @@ class CoachingController extends Controller
                 ]);
             }
 
-            return response()->json([
+            return $this->noCacheJson([
                 'success' => false,
                 'message' => 'Invalid step number.',
             ], 400);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
+            return $this->noCacheJson([
                 'success' => false,
                 'message' => 'Coaching session or question not found.',
             ], 404);
