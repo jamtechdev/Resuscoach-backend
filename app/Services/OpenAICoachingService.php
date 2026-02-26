@@ -71,6 +71,7 @@ Generate a friendly, probing question asking the user to explain their thinking 
 
     /**
      * Generate explanation for Step 3: Reveal correct answer with guideline reference.
+     * Uses the question's stored explanation as the main source so the AI expands it fully (no truncation).
      */
     public function generateStep3Explanation(Question $question, string $userSelectedOption, ?string $userReasoning = null): string
     {
@@ -85,24 +86,31 @@ Generate a friendly, probing question asking the user to explain their thinking 
             }
         }
 
+        $storedExplanation = trim((string) ($question->explanation ?? ''));
+        $explanationBlock = $storedExplanation
+            ? "\n\nAuthoritative explanation to use and expand (write a full detailed version based on this):\n{$storedExplanation}"
+            : '';
+
         $userReasoningText = $userReasoning ? "\n\nUser's reasoning: {$userReasoning}" : '';
 
-        $prompt = "You are writing the explanation for a medical exam question. Use ONLY the information provided below. Do not add or invent facts.
+        $prompt = "You are writing the full detailed explanation for a medical exam question. Use ONLY the information provided below. Do not add or invent facts.
 
-CONTEXT (do not repeat this in your response):
+CONTEXT (do not repeat this verbatim in your response):
 Question: {$question->stem}
 Scenario: " . ($question->scenario ?? 'N/A') . "
 Options: A. {$question->option_a} B. {$question->option_b} C. {$question->option_c} D. {$question->option_d} E. {$question->option_e}
 Correct answer: Option {$question->correct_option}. User selected: Option {$userSelectedOption}.{$userReasoningText}
 {$guidelineInfo}
+{$explanationBlock}
 
-TASK: Write a detailed explanation that will be shown to the learner. Rules:
-1. Do NOT repeat the question, scenario, or list of options (A, B, C...) in your reply.
+TASK: Write a complete, detailed explanation for the learner. Rules:
+1. Do NOT repeat the question, scenario, or full list of options in your reply.
 2. Do NOT use headings like 'Rationale:', 'Explanation:', or 'Why X is correct:' — start directly with the first sentence of your explanation.
-3. You MUST write 2–3 full paragraphs (at least 200 words). Paragraph 1: why the correct option ({$question->correct_option}) is the right choice, with clear clinical reasoning. Paragraph 2: how the scenario and any guideline support this. Paragraph 3 (optional): key takeaway or why other options are less appropriate. Write in full sentences; do not stop mid-thought.
-4. Use only the context above. Be educational, clear, and detailed.";
+3. You MUST write 2–3 full paragraphs (at least 200 words). Paragraph 1: why the correct option ({$question->correct_option}) is the right choice with clear clinical reasoning. Paragraph 2: how the scenario and any guideline support this. Paragraph 3 (optional): key takeaway or why other options are less appropriate. Write in full sentences; do not stop mid-thought.
+4. If an authoritative explanation was provided above, base your response on it and expand it into full paragraphs; do not truncate or leave placeholders.
+5. Use only the context above. Be educational, clear, and detailed.";
 
-        return $this->callOpenAI($prompt, 1500);
+        return $this->callOpenAI($prompt, 2000);
     }
 
     /**

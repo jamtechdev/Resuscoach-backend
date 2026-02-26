@@ -403,27 +403,76 @@ class CoachingController extends Controller
                 ->orderBy('interaction_order')
                 ->get();
 
-            // Flow: step 1 = correct answer + explanation + resource (on Continue) → step 2 = explain your thought process → then Next question (no AI feedback).
-            $currentStep = 1;
-            if ($dialogues->isNotEmpty()) {
-                $lastDialogue = $dialogues->last();
-                if ($lastDialogue->step_number === 1 && $lastDialogue->ai_feedback) {
-                    $currentStep = 2;
-                } elseif ($lastDialogue->step_number === 2 && $lastDialogue->user_response) {
-                    $currentStep = 3; // user submitted thought process → show Next question
-                } elseif ($lastDialogue->step_number === 2) {
-                    $currentStep = 2;
-                } else {
-                    $currentStep = $lastDialogue->step_number;
+            // Conversational flow: step 0 = ask to continue → step 1 = explanation + resource → step 2 = explain your thoughts → step 3 = AI feedback, next question.
+            $advance = $request->query('advance');
+            if ($advance === '1' || $advance === '2') {
+                $step1Exists = $dialogues->where('step_number', 1)->isNotEmpty();
+                $step2Exists = $dialogues->where('step_number', 2)->isNotEmpty();
+                if ($advance === '1' && !$step1Exists) {
+                    // Create step 1 dialogue (generate explanation) below when we hit step 1 block.
+                } else                if ($advance === '2' && $step1Exists && !$step2Exists) {
+                    $aiPrompt = 'Explain your own thoughts — what do you understand?';
+                    $interactionOrder = $dialogues->max('interaction_order') ?? 0;
+                    CoachingDialogue::create([
+                        'session_id' => $sessionId,
+                        'question_id' => $questionId,
+                        'step_number' => 2,
+                        'ai_prompt' => $aiPrompt,
+                        'interaction_order' => $interactionOrder + 1,
+                    ]);
+                    $dialogues = CoachingDialogue::where('session_id', $sessionId)
+                        ->where('question_id', $questionId)
+                        ->orderBy('step_number')
+                        ->orderBy('interaction_order')
+                        ->get();
                 }
             }
 
-            // When opening a question, always show step 1 first (correct answer + explanation + resource). Use ?force_step=1 on first load.
-            if ($request->query('force_step') == '1') {
-                $currentStep = 1;
+            $currentStep = 0;
+            if ($dialogues->isNotEmpty()) {
+                $step1Dialogue = $dialogues->where('step_number', 1)->first();
+                $step2Dialogue = $dialogues->where('step_number', 2)->first();
+                if (!$step1Dialogue) {
+                    $currentStep = 0;
+                } elseif (!$step2Dialogue) {
+                    $currentStep = 1;
+                } elseif ($step2Dialogue->user_response === null || $step2Dialogue->user_response === '') {
+                    $currentStep = 2;
+                } else {
+                    $currentStep = 3;
+                }
             }
 
-            // Step 1: Correct answer + explanation + resource (source/reference)
+            // When opening a question, always show step 0 first unless force_step=1 (legacy).
+            if ($request->query('force_step') == '1') {
+                $currentStep = 1;
+                // Ensure step 1 dialogue exists so we return explanation
+                $existingStep1 = $dialogues->where('step_number', 1)->first();
+                if (!$existingStep1) {
+                    $dialogues = collect();
+                }
+            }
+
+            // Step 0: Ask "Do you want the correct answer with full detailed explanation and reference link?" — user clicks Continue to advance.
+            if ($currentStep === 0) {
+                $step1Exists = $dialogues->where('step_number', 1)->isNotEmpty();
+                if (($request->query('advance') === '1' || $request->query('force_step') == '1') && !$step1Exists) {
+                    // Fall through to create step 1 and return step 1 data (below).
+                    $currentStep = 1;
+                } else {
+                    return $this->noCacheJson([
+                        'success' => true,
+                        'data' => [
+                            'question_id' => $questionId,
+                            'step_number' => 0,
+                            'message' => 'Do you want the correct answer with full detailed explanation and reference link? Click Continue to view.',
+                            'ai_prompt' => 'Do you want the correct answer with full detailed explanation and reference link?',
+                        ],
+                    ]);
+                }
+            }
+
+            // Step 1: Correct answer + explanation + resource (source/reference) — shown after user clicks Continue from step 0.
             if ($currentStep === 1) {
                 $existingDialogue = $dialogues->where('step_number', 1)->first();
 
@@ -469,6 +518,11 @@ class CoachingController extends Controller
                     $excerpt = null;
                 }
 
+                $references = $question->references ?? [];
+                if (!is_array($references)) {
+                    $references = [];
+                }
+
                 return $this->noCacheJson([
                     'success' => true,
                     'data' => [
@@ -482,11 +536,14 @@ class CoachingController extends Controller
                             'reference' => $question->guideline_reference,
                             'url' => $question->guideline_url,
                             'excerpt' => $excerpt,
+                            'references' => $references,
                         ],
                         'guideline_reference' => $question->guideline_reference,
                         'guideline_source' => $question->guideline_source,
                         'guideline_url' => $question->guideline_url,
                         'guideline_excerpt' => $excerpt,
+                        'references' => $references,
+                        'next_step_prompt' => 'When you\'re ready, go to the next step.',
                     ],
                 ]);
             }
@@ -507,7 +564,7 @@ class CoachingController extends Controller
                 if ($existingDialogue && $existingDialogue->ai_prompt) {
                     $aiPrompt = $existingDialogue->ai_prompt;
                 } else {
-                    $aiPrompt = 'Explain your own thought process — what did you understand?';
+                    $aiPrompt = 'Explain your own thoughts — what do you understand?';
                     $interactionOrder = $dialogues->max('interaction_order') ?? 0;
                     CoachingDialogue::create([
                         'session_id' => $sessionId,
@@ -529,7 +586,7 @@ class CoachingController extends Controller
                 ]);
             }
 
-            // Step 3: User submitted thought process — show Next question (no AI feedback)
+            // Step 3: User submitted thought process — show AI final feedback and Next question
             if ($currentStep === 3) {
                 $step2Dialogue = $dialogues->where('step_number', 2)->first();
                 if (!$step2Dialogue || !$step2Dialogue->user_response) {
@@ -547,6 +604,7 @@ class CoachingController extends Controller
                         'step_number' => 3,
                         'is_question_complete' => true,
                         'message' => 'Proceed to the next question.',
+                        'ai_feedback' => $step2Dialogue->ai_feedback ?? null,
                     ],
                 ]);
             }
@@ -613,6 +671,7 @@ class CoachingController extends Controller
                             'step_number' => $request->step_number,
                             'user_response' => $existing->user_response,
                             'next_step' => $request->step_number === 2 ? 3 : null,
+                            'ai_feedback' => $request->step_number === 2 ? ($existing->ai_feedback ?? null) : null,
                         ],
                     ], 200);
                 }
@@ -622,13 +681,30 @@ class CoachingController extends Controller
                 ], 404);
             }
 
-            // Update dialogue with user response
             $dialogue->update([
                 'user_response' => $request->response,
                 'response_type' => $request->response_type ?? 'text',
             ]);
 
-            // Step 2: Only save user's thought process — no AI feedback, next step is just "Next question"
+            $aiFeedback = null;
+            if ($request->step_number === 2) {
+                try {
+                    $question = Question::findOrFail($request->question_id);
+                    $aiFeedback = $this->coachingService->generateStep4Feedback(
+                        $question,
+                        $request->response
+                    );
+                    $dialogue->update(['ai_feedback' => $aiFeedback]);
+                } catch (\Throwable $e) {
+                    Log::warning('Step 2 AI feedback failed', [
+                        'question_id' => $request->question_id,
+                        'session_id' => $sessionId,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $aiFeedback = 'Thank you for sharing your thoughts. Proceed to the next question when ready.';
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Response submitted successfully.',
@@ -637,6 +713,7 @@ class CoachingController extends Controller
                     'step_number' => $request->step_number,
                     'user_response' => $request->response,
                     'next_step' => $request->step_number === 2 ? 3 : null,
+                    'ai_feedback' => $aiFeedback,
                 ],
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
