@@ -706,7 +706,18 @@ class CoachingController extends Controller
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString(),
                     ]);
-                    $aiFeedback = 'Feedback could not be generated at the moment. You can proceed to the next question.';
+                    // Fallback when API fails (e.g. quota 429): show key points from the correct explanation so the user still gets value
+                    $question = Question::find($request->question_id);
+                    $stored = $question && !empty(trim((string) ($question->explanation ?? '')))
+                        ? trim($question->explanation)
+                        : null;
+                    if ($stored !== null) {
+                        $excerpt = strlen($stored) > 500 ? substr($stored, 0, 497) . '…' : $stored;
+                        $aiFeedback = "Key points from the correct reasoning:\n\n{$excerpt}\n\nProceed to the next question when ready.";
+                    } else {
+                        $aiFeedback = 'Thanks for sharing your reasoning. Review the correct answer and explanation above, then proceed to the next question when ready.';
+                    }
+                    $dialogue->update(['ai_feedback' => $aiFeedback]);
                 }
             }
 
