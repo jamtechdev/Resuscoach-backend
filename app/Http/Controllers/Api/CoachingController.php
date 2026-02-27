@@ -411,7 +411,7 @@ class CoachingController extends Controller
                 if ($advance === '1' && !$step1Exists) {
                     // Create step 1 dialogue (generate explanation) below when we hit step 1 block.
                 } else                if ($advance === '2' && $step1Exists && !$step2Exists) {
-                    $aiPrompt = 'Explain your own thoughts — what do you understand?';
+                    $aiPrompt = 'Explain this reasoning in your own words.';
                     $interactionOrder = $dialogues->max('interaction_order') ?? 0;
                     CoachingDialogue::create([
                         'session_id' => $sessionId,
@@ -564,7 +564,7 @@ class CoachingController extends Controller
                 if ($existingDialogue && $existingDialogue->ai_prompt) {
                     $aiPrompt = $existingDialogue->ai_prompt;
                 } else {
-                    $aiPrompt = 'Explain your own thoughts — what do you understand?';
+                    $aiPrompt = 'Explain this reasoning in your own words.';
                     $interactionOrder = $dialogues->max('interaction_order') ?? 0;
                     CoachingDialogue::create([
                         'session_id' => $sessionId,
@@ -701,7 +701,7 @@ class CoachingController extends Controller
                         'session_id' => $sessionId,
                         'error' => $e->getMessage(),
                     ]);
-                    $aiFeedback = 'Thank you for sharing your thoughts. Proceed to the next question when ready.';
+                    $aiFeedback = 'Feedback could not be generated at the moment. You can proceed to the next question.';
                 }
             }
 

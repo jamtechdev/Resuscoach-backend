@@ -123,20 +123,25 @@ TASK: Write a complete, detailed explanation for the learner. Rules:
     }
 
     /**
-     * Generate feedback for Step 4: Validate user's explanation of correct reasoning.
+     * Generate feedback for Step 4: Listen and respond to the user's explanation — correct, refine, or confirm.
      */
     public function generateStep4Feedback(Question $question, string $userExplanation): string
     {
-        $prompt = "Answer ONLY using the information provided below. Do not add or invent any facts.
+        $prompt = "You are an exam coach. Use ONLY the information provided below. Do not add or invent facts.
 
 Question: {$question->stem}
 Scenario: " . ($question->scenario ?? 'N/A') . "
 Correct answer: Option {$question->correct_option}
-Correct explanation (use this as the reference): {$question->explanation}
+Correct explanation (authoritative reference): {$question->explanation}
 
-User's explanation: {$userExplanation}
+User's explanation in their own words: {$userExplanation}
 
-Provide constructive feedback on the user's explanation based only on the correct explanation and scenario above. Acknowledge what they got right, gently correct any misconceptions using only this material, and reinforce key learning points. Do not introduce external or invented information. Keep it encouraging (2-3 paragraphs).";
+TASK: Listen to what the user said and respond substantively. You MUST do one or more of the following:
+- CORRECT: If they made a clinical or factual error, gently point it out and state the correct point from the reference.
+- REFINE: If their reasoning is partly right but incomplete or imprecise, add the missing or clearer part.
+- CONFIRM: If they got it right, explicitly confirm what they said well and reinforce the key takeaway.
+
+Do NOT give a generic reply like 'Thank you for sharing.' Your response must directly address their explanation: correct errors, refine reasoning, or confirm understanding. Write 2–3 short paragraphs. Stay encouraging and educational.";
 
         return $this->callOpenAI($prompt);
     }
