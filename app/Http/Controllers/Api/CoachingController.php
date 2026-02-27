@@ -694,12 +694,17 @@ class CoachingController extends Controller
                         $question,
                         $request->response
                     );
-                    $dialogue->update(['ai_feedback' => $aiFeedback]);
+                    if ($aiFeedback !== '' && strlen(trim($aiFeedback)) > 10) {
+                        $dialogue->update(['ai_feedback' => $aiFeedback]);
+                    } else {
+                        throw new \RuntimeException('OpenAI returned empty or too short feedback.');
+                    }
                 } catch (\Throwable $e) {
-                    Log::warning('Step 2 AI feedback failed', [
+                    Log::error('Step 2 AI feedback failed', [
                         'question_id' => $request->question_id,
                         'session_id' => $sessionId,
                         'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
                     ]);
                     $aiFeedback = 'Feedback could not be generated at the moment. You can proceed to the next question.';
                 }

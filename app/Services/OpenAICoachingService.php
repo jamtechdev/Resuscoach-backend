@@ -123,27 +123,35 @@ TASK: Write a complete, detailed explanation for the learner. Rules:
     }
 
     /**
-     * Generate feedback for Step 4: Listen and respond to the user's explanation — correct, refine, or confirm.
+     * Generate feedback for Step 4: Listen and respond — correct if wrong, appreciate and add small correction if right.
      */
     public function generateStep4Feedback(Question $question, string $userExplanation): string
     {
-        $prompt = "You are an exam coach. Use ONLY the information provided below. Do not add or invent facts.
+        $stem = is_string($question->stem) ? trim($question->stem) : '';
+        $scenario = isset($question->scenario) && is_string($question->scenario) ? trim($question->scenario) : 'N/A';
+        $correctExplanation = isset($question->explanation) && is_string($question->explanation)
+            ? trim($question->explanation)
+            : 'Use the scenario and correct option above to evaluate the learner.';
+        $userText = is_string($userExplanation) ? trim($userExplanation) : '';
+        if ($userText === '') {
+            $userText = '(No reasoning provided.)';
+        }
 
-Question: {$question->stem}
-Scenario: " . ($question->scenario ?? 'N/A') . "
+        $prompt = "You are an exam coach. Use ONLY the information below. Do not invent facts.
+
+Question: {$stem}
+Scenario: {$scenario}
 Correct answer: Option {$question->correct_option}
-Correct explanation (authoritative reference): {$question->explanation}
+Correct explanation (reference): {$correctExplanation}
 
-User's explanation in their own words: {$userExplanation}
+User's reasoning in their own words: {$userText}
 
-TASK: Listen to what the user said and respond substantively. You MUST do one or more of the following:
-- CORRECT: If they made a clinical or factual error, gently point it out and state the correct point from the reference.
-- REFINE: If their reasoning is partly right but incomplete or imprecise, add the missing or clearer part.
-- CONFIRM: If they got it right, explicitly confirm what they said well and reinforce the key takeaway.
+TASK: Respond to the user's reasoning in 2–3 short paragraphs.
+- If they are WRONG or partly wrong: Correct them gently; point out the error and give the right point from the reference. Stay encouraging.
+- If they are RIGHT: Appreciate what they said well, then add one small correction or the thing they missed (e.g. a nuance or key point from the reference). Do not only say 'well done'.
+Do NOT give a generic reply like 'Thank you for sharing.' Always correct, refine, or confirm with something specific. Be educational and encouraging.";
 
-Do NOT give a generic reply like 'Thank you for sharing.' Your response must directly address their explanation: correct errors, refine reasoning, or confirm understanding. Write 2–3 short paragraphs. Stay encouraging and educational.";
-
-        return $this->callOpenAI($prompt);
+        return $this->callOpenAI($prompt, 1000);
     }
 
     /**
@@ -202,56 +210,78 @@ Keep it professional, encouraging, and actionable (4-5 paragraphs).";
      */
     private function callOpenAI(string $userPrompt, ?int $maxTokensOverride = null): string
     {
-        if (empty($this->apiKey)) {
+        $apiKey = is_string($this->apiKey) ? trim($this->apiKey) : '';
+        if ($apiKey === '') {
             Log::error('OpenAI API key is not configured');
             throw new \Exception('OpenAI API key is not configured. Please set OPENAI_API_KEY in your .env file.');
         }
 
         $maxTokens = $maxTokensOverride ?? $this->maxTokens;
 
-        try {
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Content-Type' => 'application/json',
-            ])->timeout(60)->post('https://api.openai.com/v1/chat/completions', [
-                'model' => $this->model,
-                'messages' => [
-                    [
-                        'role' => 'system',
-                        'content' => $this->getSystemPrompt(),
-                    ],
-                    [
-                        'role' => 'user',
-                        'content' => $userPrompt,
-                    ],
-                ],
-                'max_tokens' => $maxTokens,
-                'temperature' => $this->temperature,
-            ]);
+        $payload = [
+            'model' => $this->model,
+            'messages' => [
+                ['role' => 'system', 'content' => $this->getSystemPrompt()],
+                ['role' => 'user', 'content' => $userPrompt],
+            ],
+            'max_tokens' => $maxTokens,
+            'temperature' => $this->temperature,
+        ];
 
-            if ($response->failed()) {
-                Log::error('OpenAI API request failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body(),
+        $attempt = 0;
+        $lastException = null;
+
+        while ($attempt < 2) {
+            try {
+                $response = Http::withHeaders([
+                    'Authorization' => 'Bearer ' . $apiKey,
+                    'Content-Type' => 'application/json',
+                ])->timeout(90)->post('https://api.openai.com/v1/chat/completions', $payload);
+
+                if ($response->failed()) {
+                    $body = $response->body();
+                    Log::error('OpenAI API request failed', [
+                        'status' => $response->status(),
+                        'body' => $body,
+                    ]);
+                    throw new \Exception('OpenAI API request failed (HTTP ' . $response->status() . '): ' . $body);
+                }
+
+                $data = $response->json();
+                $content = $data['choices'][0]['message']['content'] ?? null;
+                $finishReason = $data['choices'][0]['finish_reason'] ?? null;
+
+                if ($content !== null && trim((string) $content) !== '') {
+                    return trim((string) $content);
+                }
+
+                if ($finishReason === 'content_filter') {
+                    Log::warning('OpenAI content filter triggered', ['response' => $data]);
+                    throw new \Exception('OpenAI returned no content (content filter). Try shorter or different wording.');
+                }
+
+                Log::error('OpenAI API response missing or empty content', [
+                    'response' => $data,
+                    'finish_reason' => $finishReason,
                 ]);
-                throw new \Exception('OpenAI API request failed: ' . $response->body());
+                throw new \Exception('Invalid response from OpenAI API: no content in response.');
+            } catch (\Exception $e) {
+                $lastException = $e;
+                $shouldRetry = $attempt < 1 && isset($response) && $response->serverError();
+                $attempt++;
+                if ($shouldRetry) {
+                    sleep(1);
+                    continue;
+                }
+                Log::error('OpenAI API error', [
+                    'message' => $e->getMessage(),
+                    'prompt_length' => strlen($userPrompt),
+                ]);
+                throw $e;
             }
-
-            $data = $response->json();
-
-            if (!isset($data['choices'][0]['message']['content'])) {
-                Log::error('OpenAI API response missing content', ['response' => $data]);
-                throw new \Exception('Invalid response from OpenAI API');
-            }
-
-            return trim($data['choices'][0]['message']['content']);
-        } catch (\Exception $e) {
-            Log::error('OpenAI API error', [
-                'message' => $e->getMessage(),
-                'prompt' => substr($userPrompt, 0, 200),
-            ]);
-            throw $e;
         }
+
+        throw $lastException ?? new \Exception('OpenAI API error.');
     }
 
     /**
