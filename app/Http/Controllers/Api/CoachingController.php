@@ -706,14 +706,21 @@ class CoachingController extends Controller
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString(),
                     ]);
-                    // Fallback when API fails (e.g. quota 429): show key points from the correct explanation so the user still gets value
+                    // Fallback when API fails (e.g. quota 429): show the correct explanation so the user still gets value
                     $question = Question::find($request->question_id);
                     $stored = $question && !empty(trim((string) ($question->explanation ?? '')))
                         ? trim($question->explanation)
                         : null;
                     if ($stored !== null) {
-                        $excerpt = strlen($stored) > 500 ? substr($stored, 0, 497) . '…' : $stored;
-                        $aiFeedback = "Key points from the correct reasoning:\n\n{$excerpt}\n\nProceed to the next question when ready.";
+                        $maxLen = 600;
+                        if (strlen($stored) <= $maxLen) {
+                            $excerpt = $stored;
+                        } else {
+                            $cut = substr($stored, 0, $maxLen + 1);
+                            $lastSpace = strrpos($cut, ' ');
+                            $excerpt = $lastSpace !== false ? substr($stored, 0, $lastSpace) . '…' : $cut . '…';
+                        }
+                        $aiFeedback = "Here are the key points from the correct reasoning:\n\n{$excerpt}\n\nWhen you're ready, proceed to the next question.";
                     } else {
                         $aiFeedback = 'Thanks for sharing your reasoning. Review the correct answer and explanation above, then proceed to the next question when ready.';
                     }
