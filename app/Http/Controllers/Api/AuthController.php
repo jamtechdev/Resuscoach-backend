@@ -186,7 +186,8 @@ class AuthController extends Controller
                     'message' => 'Email already verified.',
                 ], 400);
             }
-            return $this->renderVerificationPage('already_verified', $user);
+            $frontendUrl = rtrim((string) config('app.frontend_url', 'http://localhost:3000'), '/');
+            return redirect($frontendUrl . '/verify-email?verified=1');
         }
 
         // Verify the hash matches the user's email
@@ -209,7 +210,9 @@ class AuthController extends Controller
                     'data' => new UserResource($user),
                 ]);
             }
-            return $this->renderVerificationPage('success', $user);
+            // Redirect browser to frontend success page so "Go to Login" / "Go to Home" use client-side routing (no 404)
+            $frontendUrl = rtrim((string) config('app.frontend_url', 'http://localhost:3000'), '/');
+            return redirect($frontendUrl . '/verify-email?verified=1');
         }
 
         if ($request->expectsJson()) {
@@ -226,7 +229,8 @@ class AuthController extends Controller
      */
     private function renderVerificationPage(string $status, User $user)
     {
-        $frontendUrl = config('app.frontend_url', 'http://localhost:3000');
+        // Normalize: no trailing slash so /login and / resolve correctly on frontend
+        $frontendUrl = rtrim((string) config('app.frontend_url', 'http://localhost:3000'), '/');
 
         $messages = [
             'success' => [
@@ -343,8 +347,8 @@ class AuthController extends Controller
         <h1>{$content['title']}</h1>
         <p>{$content['message']}</p>
         <div>
-            <a href="{$frontendUrl}/login" class="button">Go to Login</a>
-            <a href="{$frontendUrl}" class="button button-secondary">Go to Home</a>
+            <a href="{$frontendUrl}/verify-email?then=login" class="button">Go to Login</a>
+            <a href="{$frontendUrl}/verify-email?then=home" class="button button-secondary">Go to Home</a>
         </div>
         <div class="footer">
             <p>ResusCoach - Medical Exam Preparation Platform</p>

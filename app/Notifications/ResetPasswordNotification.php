@@ -29,7 +29,7 @@ class ResetPasswordNotification extends ResetPassword
     {
         // Generate a signed URL for API password reset
         // In production, this would point to your frontend reset page
-        $frontendUrl = config('app.frontend_url', 'http://localhost:3000');
+        $frontendUrl = rtrim((string) config('app.frontend_url', 'http://localhost:3000'), '/');
 
         // For API, we'll return a URL that includes the token
         // Frontend can extract token and call the reset endpoint
