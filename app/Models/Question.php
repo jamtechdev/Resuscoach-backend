@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class Question extends Model
 {
@@ -123,5 +124,51 @@ class Question extends Model
     public function getFormattedReferencesAttribute(): array
     {
         return $this->references ?? [];
+    }
+
+    /**
+     * Public URL for question images (uploads live on the public disk).
+     * Uses filesystem disk URL (APP_URL + /storage) so links stay consistent with php artisan storage:link.
+     */
+    public function getImageUrlAttribute($value): ?string
+    {
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        $value = trim($value);
+        if (Str::startsWith($value, ['http://', 'https://'])) {
+            $storageBase = rtrim((string) config('filesystems.disks.public.url'), '/');
+            $parsed = parse_url($value);
+            $path = is_array($parsed) ? ($parsed['path'] ?? '') : '';
+            if (
+                $storageBase !== ''
+                && is_string($path)
+                && str_starts_with($path, '/storage/')
+            ) {
+                $relative = ltrim(substr($path, strlen('/storage')), '/');
+                $query = isset($parsed['query']) && is_string($parsed['query'])
+                    ? '?' . $parsed['query']
+                    : '';
+
+                return "{$storageBase}/{$relative}{$query}";
+            }
+
+            return $value;
+        }
+
+        $path = ltrim($value, '/');
+        if (Str::startsWith($path, 'storage/')) {
+            $path = Str::after($path, 'storage/');
+        }
+
+        $path = ltrim(str_replace('\\', '/', $path), '/');
+        $base = rtrim((string) config('filesystems.disks.public.url'), '/');
+        if ($base === '') {
+            $appUrl = rtrim((string) config('app.url'), '/');
+            $base = $appUrl !== '' ? "{$appUrl}/storage" : '';
+        }
+
+        return $base !== '' ? "{$base}/{$path}" : "/storage/{$path}";
     }
 }

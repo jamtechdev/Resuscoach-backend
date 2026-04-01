@@ -41,7 +41,9 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => env('APP_URL').'/storage',
+            // Use PUBLIC_STORAGE_URL when /storage is blocked on APP_URL (e.g. admin console subdomain).
+            // Example: PUBLIC_STORAGE_URL=https://api.resuscoach.com/storage
+            'url' => rtrim((string) env('PUBLIC_STORAGE_URL', rtrim((string) env('APP_URL', 'http://localhost'), '/').'/storage'), '/'),
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

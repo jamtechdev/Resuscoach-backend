@@ -17,7 +17,8 @@ class CreateQuestion extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         if (!empty($data['image_upload'])) {
-            $data['image_url'] = asset('storage/' . ltrim($data['image_upload'], '/'));
+            // Store a relative path so URLs remain valid across environments.
+            $data['image_url'] = 'storage/' . ltrim($data['image_upload'], '/');
         }
         unset($data['image_upload']);
         return $data;

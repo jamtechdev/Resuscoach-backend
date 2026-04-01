@@ -28,6 +28,7 @@ class ExamAnswerWithDetailsResource extends JsonResource
             // Question details with correct answer and explanation
             'question' => [
                 'id' => $question->id,
+                'scenario' => $question->scenario,
                 'stem' => $question->stem,
                 'options' => [
                     'A' => $question->option_a,
